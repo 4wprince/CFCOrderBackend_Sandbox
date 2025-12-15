@@ -1496,38 +1496,77 @@ def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: 
         raise HTTPException(status_code=400, detail="B2BWave not configured")
     
     try:
-        # Call B2BWave API to set tracking and notify customer
-        # Note: B2BWave expects notify as string "true", not boolean
-        # B2BWave API docs show no .json extension for this endpoint
+        credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Basic {credentials}'
+        }
+        
+        # Set tracking with notify=true and change status to "Sent" (status_order_id=5 based on sort order)
+        # The B2BWave API supports status_order_id in set_shipping_tracking
         url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking"
         
         print(f"[B2BWAVE] Sending tracking to: {url}")
         print(f"[B2BWAVE] Order: {order_id}, Tracking: {tracking_number}")
         
+        # Include notify=true to request customer notification
         request_body = json.dumps({
             "shipping_tracking": tracking_number,
-            "notify": "true"  # String "true" sends the email to customer
+            "notify": "true"
         }).encode()
         
         print(f"[B2BWAVE] Request body: {request_body}")
-        
-        credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
         
         req = urllib.request.Request(
             url,
             data=request_body,
             method='PATCH',
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Basic {credentials}'
-            }
+            headers=headers
         )
         
         with urllib.request.urlopen(req, timeout=30) as response:
             response_body = response.read().decode()
-            print(f"[B2BWAVE] Response: {response_body}")
+            print(f"[B2BWAVE] Tracking Response: {response_body}")
             result = json.loads(response_body)
             print(f"[B2BWAVE] Parsed result: {result}")
+        
+        # Also explicitly change order status to "Sent" to trigger notification
+        # First get the status ID for "Sent"
+        try:
+            status_url = f"{B2BWAVE_URL}/api/status_orders.json"
+            status_req = urllib.request.Request(status_url, headers=headers, method='GET')
+            
+            with urllib.request.urlopen(status_req, timeout=15) as status_response:
+                statuses = json.loads(status_response.read().decode())
+                sent_status_id = None
+                for status in statuses:
+                    if status.get('name', '').lower() == 'sent':
+                        sent_status_id = status.get('id')
+                        print(f"[B2BWAVE] Found 'Sent' status ID: {sent_status_id}")
+                        break
+                
+                if sent_status_id:
+                    # Change order status to Sent
+                    change_url = f"{B2BWAVE_URL}/api/orders/{order_id}/change_status"
+                    change_body = json.dumps({
+                        "status_order_id": sent_status_id,
+                        "notify": "true"
+                    }).encode()
+                    
+                    print(f"[B2BWAVE] Changing status to Sent (ID: {sent_status_id})")
+                    
+                    change_req = urllib.request.Request(
+                        change_url,
+                        data=change_body,
+                        method='PATCH',
+                        headers=headers
+                    )
+                    
+                    with urllib.request.urlopen(change_req, timeout=15) as change_response:
+                        change_result = json.loads(change_response.read().decode())
+                        print(f"[B2BWAVE] Status change result: {change_result}")
+        except Exception as e:
+            print(f"[B2BWAVE] Status change failed (non-fatal): {e}")
         
         # Update our local database
         with get_db() as conn:
