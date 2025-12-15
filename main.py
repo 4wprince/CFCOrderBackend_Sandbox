@@ -138,7 +138,7 @@ WAREHOUSE_ZIPS = {
 # Keywords that indicate oversized shipment (need dimensions on RL quote)
 OVERSIZED_KEYWORDS = ['OVEN', 'PANTRY', '96"', '96*', 'X96', '96X', '96H', '96 H']
 
-app = FastAPI(title="CFC Order Workflow", version="5.8.4")
+app = FastAPI(title="CFC Order Workflow", version="5.9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1085,7 +1085,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.8.4"}
+    return {"status": "ok", "version": "5.9.0"}
 
 @app.post("/create-shipments-table")
 def create_shipments_table():
