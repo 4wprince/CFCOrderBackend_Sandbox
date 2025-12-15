@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import threading
 import time
+from email.mime.text import MIMEText
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional, List
@@ -63,6 +64,11 @@ if DATABASE_URL and "sslmode" not in DATABASE_URL:
 B2BWAVE_URL = os.environ.get("B2BWAVE_URL", "").strip().rstrip('/')
 B2BWAVE_USERNAME = os.environ.get("B2BWAVE_USERNAME", "").strip()
 B2BWAVE_API_KEY = os.environ.get("B2BWAVE_API_KEY", "").strip()
+
+# Gmail OAuth Config (for sending emails)
+GMAIL_CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "").strip()
+GMAIL_CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "").strip()
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "").strip()
 
 # Anthropic API Config
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -799,6 +805,115 @@ Example bad output (too verbose):
     return call_anthropic_api(prompt)
 
 # =============================================================================
+# GMAIL SEND EMAIL
+# =============================================================================
+
+def get_gmail_access_token():
+    """Get fresh Gmail access token using refresh token"""
+    if not GMAIL_CLIENT_ID or not GMAIL_CLIENT_SECRET or not GMAIL_REFRESH_TOKEN:
+        return None
+    
+    try:
+        data = urllib.parse.urlencode({
+            'client_id': GMAIL_CLIENT_ID,
+            'client_secret': GMAIL_CLIENT_SECRET,
+            'refresh_token': GMAIL_REFRESH_TOKEN,
+            'grant_type': 'refresh_token'
+        }).encode()
+        
+        req = urllib.request.Request('https://oauth2.googleapis.com/token', data=data, method='POST')
+        with urllib.request.urlopen(req, timeout=10) as response:
+            result = json.loads(response.read().decode())
+            return result.get('access_token')
+    except Exception as e:
+        print(f"[GMAIL] Failed to get access token: {e}")
+        return None
+
+def send_gmail_email(to_email: str, subject: str, body: str) -> bool:
+    """Send email via Gmail API"""
+    access_token = get_gmail_access_token()
+    if not access_token:
+        print("[GMAIL] No access token available")
+        return False
+    
+    try:
+        # Build the email
+        message = MIMEText(body)
+        message['to'] = to_email
+        message['subject'] = subject
+        message['from'] = 'cabinetsforcontractors@gmail.com'
+        
+        # Encode for Gmail API
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        
+        # Send via Gmail API
+        url = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send'
+        request_body = json.dumps({'raw': raw}).encode()
+        
+        req = urllib.request.Request(
+            url,
+            data=request_body,
+            method='POST',
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+            print(f"[GMAIL] Email sent successfully, message ID: {result.get('id')}")
+            return True
+            
+    except Exception as e:
+        print(f"[GMAIL] Failed to send email: {e}")
+        return False
+
+def send_tracking_email_gmail(order: dict, tracking_number: str, ship_method: str = None) -> bool:
+    """Send tracking email to customer via Gmail"""
+    customer_email = order.get('email', '')
+    if not customer_email:
+        print(f"[GMAIL] No email for order {order.get('order_id')}")
+        return False
+    
+    customer_name = order.get('customer_name', 'Valued Customer')
+    company_name = order.get('company_name') or customer_name
+    order_id = order.get('order_id', '')
+    first_name = customer_name.split()[0] if customer_name else 'Customer'
+    
+    # Determine carrier and tracking URL
+    carrier = 'Freight'
+    tracking_url = ''
+    
+    if ship_method == 'LTL':
+        carrier = 'RL Carriers'
+        tracking_url = f'https://www.rlcarriers.com/freight/shipping/shipment-tracing?pro={tracking_number}'
+    elif ship_method in ('Pirateship', 'BoxTruck'):
+        if tracking_number.startswith('1Z'):
+            carrier = 'UPS'
+            tracking_url = f'https://www.ups.com/track?tracknum={tracking_number}'
+        elif len(tracking_number) in (22, 26):
+            carrier = 'USPS'
+            tracking_url = f'https://tools.usps.com/go/TrackConfirmAction?tLabels={tracking_number}'
+        else:
+            carrier = 'Carrier'
+    
+    subject = f"{company_name}, please see tracking information for order {order_id}"
+    
+    body = f"""Hey {first_name},
+
+Thank you for your business! Your order {order_id} has been shipped.
+
+{carrier} Tracking Number: {tracking_number}
+{f'Track your shipment: {tracking_url}' if tracking_url else ''}
+
+Thank you for your business,
+The Cabinets For Contractors Team"""
+    
+    print(f"[GMAIL] Sending tracking email to {customer_email} for order {order_id}")
+    return send_gmail_email(customer_email, subject, body)
+
+# =============================================================================
 # B2BWAVE API INTEGRATION
 # =============================================================================
 
@@ -1478,95 +1593,72 @@ def sync_from_gmail(hours_back: int = 2):
         raise HTTPException(status_code=500, detail=f"Gmail sync error: {str(e)}")
 
 # =============================================================================
-# B2BWAVE TRACKING NOTIFICATION
+# TRACKING EMAIL (via Gmail)
 # =============================================================================
 
 @app.post("/orders/{order_id}/send-tracking")
-def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: str = None):
+def send_tracking_email(order_id: str, tracking_number: str, shipment_id: str = None):
     """
-    Send tracking number to customer via B2BWave.
-    B2BWave will email the customer from notifications+cabinetsforcontractors@b2bemailservice.com
+    Send tracking number to customer via Gmail.
+    Also updates B2BWave tracking field.
     
     Parameters:
-    - order_id: The order ID (matches B2BWave order ID)
+    - order_id: The order ID
     - tracking_number: The tracking/PRO number to send
     - shipment_id: Optional - update specific shipment record
     """
-    if not B2BWAVE_URL or not B2BWAVE_USERNAME or not B2BWAVE_API_KEY:
-        raise HTTPException(status_code=400, detail="B2BWave not configured")
+    
+    email_sent = False
+    b2bwave_updated = False
+    ship_method = None
     
     try:
-        credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Basic {credentials}'
-        }
-        
-        # Set tracking with notify=true and change status to "Sent" (status_order_id=5 based on sort order)
-        # The B2BWave API supports status_order_id in set_shipping_tracking
-        url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking"
-        
-        print(f"[B2BWAVE] Sending tracking to: {url}")
-        print(f"[B2BWAVE] Order: {order_id}, Tracking: {tracking_number}")
-        
-        # Include notify=true to request customer notification
-        request_body = json.dumps({
-            "shipping_tracking": tracking_number,
-            "notify": "true"
-        }).encode()
-        
-        print(f"[B2BWAVE] Request body: {request_body}")
-        
-        req = urllib.request.Request(
-            url,
-            data=request_body,
-            method='PATCH',
-            headers=headers
-        )
-        
-        with urllib.request.urlopen(req, timeout=30) as response:
-            response_body = response.read().decode()
-            print(f"[B2BWAVE] Tracking Response: {response_body}")
-            result = json.loads(response_body)
-            print(f"[B2BWAVE] Parsed result: {result}")
-        
-        # Also explicitly change order status to "Sent" to trigger notification
-        # First get the status ID for "Sent"
-        try:
-            status_url = f"{B2BWAVE_URL}/api/status_orders.json"
-            status_req = urllib.request.Request(status_url, headers=headers, method='GET')
-            
-            with urllib.request.urlopen(status_req, timeout=15) as status_response:
-                statuses = json.loads(status_response.read().decode())
-                sent_status_id = None
-                for status in statuses:
-                    if status.get('name', '').lower() == 'sent':
-                        sent_status_id = status.get('id')
-                        print(f"[B2BWAVE] Found 'Sent' status ID: {sent_status_id}")
-                        break
+        # Get order info from database for email
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM orders WHERE order_id = %s", (order_id,))
+                order = cur.fetchone()
                 
-                if sent_status_id:
-                    # Change order status to Sent
-                    change_url = f"{B2BWAVE_URL}/api/orders/{order_id}/change_status"
-                    change_body = json.dumps({
-                        "status_order_id": sent_status_id,
-                        "notify": "true"
-                    }).encode()
-                    
-                    print(f"[B2BWAVE] Changing status to Sent (ID: {sent_status_id})")
-                    
-                    change_req = urllib.request.Request(
-                        change_url,
-                        data=change_body,
-                        method='PATCH',
-                        headers=headers
-                    )
-                    
-                    with urllib.request.urlopen(change_req, timeout=15) as change_response:
-                        change_result = json.loads(change_response.read().decode())
-                        print(f"[B2BWAVE] Status change result: {change_result}")
-        except Exception as e:
-            print(f"[B2BWAVE] Status change failed (non-fatal): {e}")
+                # Get shipment info for ship method
+                if shipment_id:
+                    cur.execute("SELECT ship_method FROM order_shipments WHERE shipment_id = %s", (shipment_id,))
+                    shipment = cur.fetchone()
+                    if shipment:
+                        ship_method = shipment.get('ship_method')
+        
+        if order:
+            # Send email via Gmail
+            print(f"[TRACKING] Sending tracking email via Gmail to {order.get('email')}")
+            email_sent = send_tracking_email_gmail(dict(order), tracking_number, ship_method)
+        else:
+            print(f"[TRACKING] Order {order_id} not found in database")
+        
+        # Update B2BWave tracking field (without notify - we use Gmail)
+        if B2BWAVE_URL and B2BWAVE_USERNAME and B2BWAVE_API_KEY:
+            try:
+                credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
+                url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking"
+                
+                request_body = json.dumps({
+                    "shipping_tracking": tracking_number
+                }).encode()
+                
+                req = urllib.request.Request(
+                    url,
+                    data=request_body,
+                    method='PATCH',
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Basic {credentials}'
+                    }
+                )
+                
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    result = json.loads(response.read().decode())
+                    print(f"[B2BWAVE] Tracking updated: {result}")
+                    b2bwave_updated = True
+            except Exception as e:
+                print(f"[B2BWAVE] Failed to update tracking (non-fatal): {e}")
         
         # Update our local database
         with get_db() as conn:
@@ -1593,27 +1685,33 @@ def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: 
                 # Log event
                 cur.execute("""
                     INSERT INTO order_events (order_id, event_type, event_data, source)
-                    VALUES (%s, 'tracking_sent', %s, 'b2bwave_api')
+                    VALUES (%s, 'tracking_sent', %s, 'gmail_api')
                 """, (order_id, json.dumps({
                     'tracking_number': tracking_number,
                     'shipment_id': shipment_id,
-                    'notified': True
+                    'email_sent': email_sent,
+                    'b2bwave_updated': b2bwave_updated
                 })))
                 
                 conn.commit()
         
-        return {
-            "status": "ok",
-            "message": f"Tracking {tracking_number} sent to customer via B2BWave",
-            "b2bwave_response": result
-        }
+        if email_sent:
+            return {
+                "status": "ok",
+                "message": f"Tracking {tracking_number} emailed to customer via Gmail",
+                "email_sent": True,
+                "b2bwave_updated": b2bwave_updated
+            }
+        else:
+            return {
+                "status": "partial",
+                "message": f"Tracking {tracking_number} saved but email failed",
+                "email_sent": False,
+                "b2bwave_updated": b2bwave_updated
+            }
         
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode() if e.fp else str(e)
-        print(f"[B2BWAVE] Error sending tracking: {e.code} - {error_body}")
-        raise HTTPException(status_code=e.code, detail=f"B2BWave API error: {error_body}")
     except Exception as e:
-        print(f"[B2BWAVE] Error sending tracking: {e}")
+        print(f"[TRACKING] Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send tracking: {str(e)}")
 
 @app.post("/orders/{order_id}/regenerate-summary")
