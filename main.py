@@ -1498,8 +1498,8 @@ def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: 
     try:
         # Call B2BWave API to set tracking and notify customer
         # Note: B2BWave expects notify as string "true", not boolean
-        # Adding .json extension as B2BWave API may require it
-        url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking.json"
+        # B2BWave API docs show no .json extension for this endpoint
+        url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking"
         
         print(f"[B2BWAVE] Sending tracking to: {url}")
         print(f"[B2BWAVE] Order: {order_id}, Tracking: {tracking_number}")
@@ -1508,6 +1508,8 @@ def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: 
             "shipping_tracking": tracking_number,
             "notify": "true"  # String "true" sends the email to customer
         }).encode()
+        
+        print(f"[B2BWAVE] Request body: {request_body}")
         
         credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
         
@@ -1522,7 +1524,10 @@ def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: 
         )
         
         with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode())
+            response_body = response.read().decode()
+            print(f"[B2BWAVE] Response: {response_body}")
+            result = json.loads(response_body)
+            print(f"[B2BWAVE] Parsed result: {result}")
         
         # Update our local database
         with get_db() as conn:
