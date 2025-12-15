@@ -1478,8 +1478,94 @@ def sync_from_gmail(hours_back: int = 2):
         raise HTTPException(status_code=500, detail=f"Gmail sync error: {str(e)}")
 
 # =============================================================================
-# AI SUMMARY REGENERATION
+# B2BWAVE TRACKING NOTIFICATION
 # =============================================================================
+
+@app.post("/orders/{order_id}/send-tracking")
+def send_tracking_via_b2bwave(order_id: str, tracking_number: str, shipment_id: str = None):
+    """
+    Send tracking number to customer via B2BWave.
+    B2BWave will email the customer from notifications+cabinetsforcontractors@b2bemailservice.com
+    
+    Parameters:
+    - order_id: The order ID (matches B2BWave order ID)
+    - tracking_number: The tracking/PRO number to send
+    - shipment_id: Optional - update specific shipment record
+    """
+    if not B2BWAVE_URL or not B2BWAVE_USERNAME or not B2BWAVE_API_KEY:
+        raise HTTPException(status_code=400, detail="B2BWave not configured")
+    
+    try:
+        # Call B2BWave API to set tracking and notify customer
+        url = f"{B2BWAVE_URL}/api/orders/{order_id}/set_shipping_tracking"
+        
+        request_body = json.dumps({
+            "shipping_tracking": tracking_number,
+            "notify": True  # This sends the email to customer
+        }).encode()
+        
+        credentials = base64.b64encode(f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}".encode()).decode()
+        
+        req = urllib.request.Request(
+            url,
+            data=request_body,
+            method='PATCH',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Basic {credentials}'
+            }
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode())
+        
+        # Update our local database
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                # Update shipment if specified
+                if shipment_id:
+                    cur.execute("""
+                        UPDATE order_shipments 
+                        SET tracking_number = %s, 
+                            status = 'shipped',
+                            shipped_at = NOW(),
+                            updated_at = NOW()
+                        WHERE shipment_id = %s
+                    """, (tracking_number, shipment_id))
+                
+                # Also update the main order tracking field
+                cur.execute("""
+                    UPDATE orders 
+                    SET tracking = %s,
+                        updated_at = NOW()
+                    WHERE order_id = %s
+                """, (tracking_number, order_id))
+                
+                # Log event
+                cur.execute("""
+                    INSERT INTO order_events (order_id, event_type, event_data, source)
+                    VALUES (%s, 'tracking_sent', %s, 'b2bwave_api')
+                """, (order_id, json.dumps({
+                    'tracking_number': tracking_number,
+                    'shipment_id': shipment_id,
+                    'notified': True
+                })))
+                
+                conn.commit()
+        
+        return {
+            "status": "ok",
+            "message": f"Tracking {tracking_number} sent to customer via B2BWave",
+            "b2bwave_response": result
+        }
+        
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        print(f"[B2BWAVE] Error sending tracking: {e.code} - {error_body}")
+        raise HTTPException(status_code=e.code, detail=f"B2BWave API error: {error_body}")
+    except Exception as e:
+        print(f"[B2BWAVE] Error sending tracking: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send tracking: {str(e)}")
 
 @app.post("/orders/{order_id}/regenerate-summary")
 def regenerate_order_summary(order_id: str):
@@ -2885,4 +2971,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
- 
