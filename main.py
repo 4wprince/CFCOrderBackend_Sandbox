@@ -1081,7 +1081,6 @@ def root():
         "gmail_sync": {
             "enabled": gmail_configured()
         }
-        }
     }
 
 @app.get("/health")
@@ -2676,4 +2675,4 @@ def check_payment_alerts():
                 ))
                 alerts_created += 1
     
-    return {"status": "ok", "alerts_created": alerts_created} 
+    return {"status": "ok", "alerts_created": alerts_created}
