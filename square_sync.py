@@ -92,8 +92,9 @@ def get_recent_payments(hours_back: int = 24) -> List[dict]:
     Get completed payments from Square API.
     Returns list of payment objects with amount, description, and timestamp.
     """
-    # Calculate the start time
-    begin_time = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).isoformat()
+    # Calculate the start time - Square requires RFC 3339 format with Z suffix
+    dt = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+    begin_time = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     params = {
         "location_id": SQUARE_LOCATION_ID,
