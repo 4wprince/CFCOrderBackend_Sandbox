@@ -297,10 +297,9 @@ def run_gmail_sync(db_conn, hours_back=2):
     # 5. LI Invoices (Li's invoices = order delivered)
     results["li_invoices"] = 0
     try:
-        # Search for invoices - look for "Cabinetry Distribution" in subject (handles Fwd: prefix)
-        # Label with spaces becomes hyphenated in Gmail search
-        messages = search_emails(f'{time_filter} label:LI-Invoices')
-        print(f"[GMAIL] Found {len(messages)} emails in LI-Invoices label")
+        # Search for invoices - label is lowercase in Gmail search
+        messages = search_emails(f'{time_filter} label:li-invoices')
+        print(f"[GMAIL] Found {len(messages)} emails in li-invoices label")
         
         # If no results with label, try searching by content
         if not messages:
