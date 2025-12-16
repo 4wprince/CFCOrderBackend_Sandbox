@@ -297,14 +297,24 @@ def run_gmail_sync(db_conn, hours_back=2):
     # 5. LI Invoices (Li's invoices = order delivered)
     results["li_invoices"] = 0
     try:
-        # Search for invoices forwarded from cfcinvoices42 or in LI Invoices label
-        messages = search_emails(f'{time_filter} (from:cfcinvoices42@gmail.com OR label:LI-Invoices) subject:"Pay invoice" "Cabinetry Distribution"')
-        print(f"[GMAIL] Found {len(messages)} LI invoice emails")
+        # Search for invoices - look for "Cabinetry Distribution" in subject (handles Fwd: prefix)
+        # Label with spaces becomes hyphenated in Gmail search
+        messages = search_emails(f'{time_filter} label:LI-Invoices')
+        print(f"[GMAIL] Found {len(messages)} emails in LI-Invoices label")
+        
+        # If no results with label, try searching by content
+        if not messages:
+            messages = search_emails(f'{time_filter} subject:"Cabinetry Distribution" invoice')
+            print(f"[GMAIL] Found {len(messages)} emails matching Cabinetry Distribution invoice")
         
         for msg in messages:
             try:
                 email = get_email_content(msg['id'])
                 if not email:
+                    continue
+                
+                # Verify it's an LI invoice (subject contains Cabinetry Distribution)
+                if 'cabinetry distribution' not in email['subject'].lower():
                     continue
                 
                 # Extract PO number from body (format: "Po    5305")
