@@ -7,6 +7,7 @@ Detects: Payment links sent, Payments received (Square), RL Quotes, Tracking num
 import os
 import re
 import json
+import base64
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
@@ -99,19 +100,38 @@ def get_email_content(message_id):
     
     headers = {h['name'].lower(): h['value'] for h in data.get('payload', {}).get('headers', [])}
     
-    # Extract body
+    # Extract body - try text/plain first, then text/html
     body = ""
+    html_body = ""
     payload = data.get('payload', {})
     
     if 'body' in payload and payload['body'].get('data'):
-        import base64
         body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8', errors='ignore')
     elif 'parts' in payload:
         for part in payload['parts']:
-            if part.get('mimeType') == 'text/plain' and part.get('body', {}).get('data'):
-                import base64
-                body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8', errors='ignore')
-                break
+            mime_type = part.get('mimeType', '')
+            part_data = part.get('body', {}).get('data')
+            
+            if mime_type == 'text/plain' and part_data:
+                body = base64.urlsafe_b64decode(part_data).decode('utf-8', errors='ignore')
+            elif mime_type == 'text/html' and part_data and not html_body:
+                html_body = base64.urlsafe_b64decode(part_data).decode('utf-8', errors='ignore')
+            
+            # Check nested parts (for multipart/alternative inside multipart/mixed)
+            if 'parts' in part:
+                for subpart in part['parts']:
+                    sub_mime = subpart.get('mimeType', '')
+                    sub_data = subpart.get('body', {}).get('data')
+                    if sub_mime == 'text/plain' and sub_data:
+                        body = base64.urlsafe_b64decode(sub_data).decode('utf-8', errors='ignore')
+                    elif sub_mime == 'text/html' and sub_data and not html_body:
+                        html_body = base64.urlsafe_b64decode(sub_data).decode('utf-8', errors='ignore')
+    
+    # If no plain text, use HTML (strip tags for basic text extraction)
+    if not body and html_body:
+        # Basic HTML tag stripping
+        body = re.sub(r'<[^>]+>', ' ', html_body)
+        body = re.sub(r'\s+', ' ', body).strip()
     
     return {
         'id': message_id,
@@ -297,42 +317,51 @@ def run_gmail_sync(db_conn, hours_back=2):
     # 5. LI Invoices (Li's invoices = order delivered)
     results["li_invoices"] = 0
     try:
-        # Search label OR content - not label-only (handles unlabeled invoices)
-        messages = search_emails(f'{time_filter} (label:li-invoices OR "Cabinetry Distribution" invoice)')
+        # Search label OR content with proper Gmail syntax
+        messages = search_emails(f'{time_filter} (label:li-invoices OR (from:cfcinvoices42@gmail.com) OR ("Cabinetry Distribution" invoice))')
         print(f"[GMAIL] Found {len(messages)} potential LI invoice emails")
         
         # Allowed senders for LI invoices
-        allowed_senders = ['cabinetry distribution', 'cfcinvoices42@gmail.com', 'cabinetrydistribution@gmail.com']
+        allowed_senders = ['cabinetry distribution', 'cfcinvoices42', 'cabinetrydistribution', 'square']
         
         for msg in messages:
             try:
                 email = get_email_content(msg['id'])
                 if not email:
+                    print(f"[GMAIL] Could not get content for message {msg['id']}")
                     continue
+                
+                print(f"[GMAIL] Checking email from: {email['from']}, subject: {email['subject'][:50]}")
                 
                 # Validate sender (soft check)
                 from_text = email['from'].lower()
                 if not any(s in from_text for s in allowed_senders):
+                    print(f"[GMAIL] Skipping - sender not in allowed list: {email['from']}")
                     continue
                 
                 # Check subject OR body for Cabinetry Distribution (handles Fwd: and variations)
                 subject_and_body = (email['subject'] + " " + email['body']).lower()
                 if 'cabinetry distribution' not in subject_and_body:
+                    print(f"[GMAIL] Skipping - 'cabinetry distribution' not found in subject/body")
                     continue
                 
-                # Robust PO extraction - handles: Po 5305, PO: 5305, PO#5305, P.O. 5305
-                po_match = re.search(r'\bP\.?O\.?\s*[:#]?\s*(\d{4,5})\b', subject_and_body, re.IGNORECASE)
+                # Robust PO extraction - handles: Po 5305, PO: 5305, PO#5305, P.O. 5305 (4-6 digits)
+                po_match = re.search(r'\bP\.?O\.?\s*[:#]?\s*(\d{4,6})\b', subject_and_body, re.IGNORECASE)
                 if po_match:
                     order_id = po_match.group(1)
                     print(f"[GMAIL] LI Invoice for order {order_id}")
                     update_li_shipment_delivered(db_conn, order_id, email)
                     results["li_invoices"] += 1
+                else:
+                    print(f"[GMAIL] No PO number found in email")
                     
             except Exception as e:
                 results["errors"].append(f"LI invoice error: {e}")
+                print(f"[GMAIL] LI invoice error: {e}")
                 
     except Exception as e:
         results["errors"].append(f"LI invoice search error: {e}")
+        print(f"[GMAIL] LI invoice search error: {e}")
     
     print(f"[GMAIL] Sync complete: {results}")
     return results
