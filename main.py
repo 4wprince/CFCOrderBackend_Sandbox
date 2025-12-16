@@ -50,6 +50,20 @@ except ImportError:
     def should_regenerate(order, event_type=None):
         return False
 
+# Square sync module
+try:
+    from square_sync import run_square_sync, square_configured, get_recent_payments, extract_order_ids
+except ImportError:
+    print("[STARTUP] square_sync module not found, Square payment sync disabled")
+    def run_square_sync(conn, hours_back=24):
+        return {"status": "disabled", "reason": "module_not_found"}
+    def square_configured():
+        return False
+    def get_recent_payments(hours_back=24):
+        return []
+    def extract_order_ids(text):
+        return []
+
 # =============================================================================
 # CONFIG
 # =============================================================================
@@ -1168,6 +1182,16 @@ def run_auto_sync():
             except Exception as e:
                 print(f"[AUTO-SYNC] Gmail sync error: {e}")
             
+            # Run Square payment sync
+            if square_configured():
+                try:
+                    with get_db() as conn:
+                        square_results = run_square_sync(conn, hours_back=2)
+                        updated_count = len(square_results.get('orders_updated', []))
+                        print(f"[AUTO-SYNC] Square: {updated_count} orders updated")
+                except Exception as e:
+                    print(f"[AUTO-SYNC] Square sync error: {e}")
+            
         except Exception as e:
             print(f"[AUTO-SYNC] Error: {e}")
         finally:
@@ -1591,6 +1615,101 @@ def sync_from_gmail(hours_back: int = 2):
         return {"status": "ok", "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gmail sync error: {str(e)}")
+
+# =============================================================================
+# SQUARE PAYMENT SYNC
+# =============================================================================
+
+@app.post("/square/sync")
+def sync_from_square(hours_back: int = 24):
+    """
+    Sync payment status from Square API.
+    Pulls completed payments and matches to orders by parsing order numbers
+    from the payment description/name (e.g., "5317 & 5319 G&B CFC").
+    
+    Default: last 24 hours of payments.
+    """
+    if not square_configured():
+        raise HTTPException(
+            status_code=400, 
+            detail="Square API not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID environment variables."
+        )
+    
+    try:
+        with get_db() as conn:
+            results = run_square_sync(conn, hours_back=hours_back)
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Square sync error: {str(e)}")
+
+
+@app.get("/square/test")
+def test_square_connection():
+    """Test Square API connection and show sample payment data"""
+    if not square_configured():
+        return {
+            "status": "error",
+            "message": "Square API not configured",
+            "config": {
+                "access_token_set": bool(os.environ.get("SQUARE_ACCESS_TOKEN")),
+                "location_id_set": bool(os.environ.get("SQUARE_LOCATION_ID"))
+            }
+        }
+    
+    try:
+        payments = get_recent_payments(hours_back=48)
+        sample = None
+        if payments:
+            # Parse first payment to show what we extract
+            from square_sync import parse_payment_for_matching
+            sample = parse_payment_for_matching(payments[0])
+            # Remove raw_payment from sample (too verbose)
+            sample.pop("raw_payment", None)
+        
+        return {
+            "status": "ok",
+            "message": f"Square API connected. Found {len(payments)} payments in last 48 hours.",
+            "sample_parsed_payment": sample
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+@app.get("/square/recent-payments")
+def list_square_payments(hours_back: int = 48):
+    """
+    List recent Square payments with extracted order IDs.
+    Use this to verify order ID extraction is working correctly.
+    """
+    if not square_configured():
+        raise HTTPException(status_code=400, detail="Square API not configured")
+    
+    try:
+        payments = get_recent_payments(hours_back=hours_back)
+        
+        from square_sync import parse_payment_for_matching
+        parsed_payments = []
+        for p in payments:
+            parsed = parse_payment_for_matching(p)
+            parsed_payments.append({
+                "payment_id": parsed["payment_id"],
+                "amount": parsed["amount"],
+                "description": parsed["description"],
+                "extracted_order_ids": parsed["order_ids"],
+                "created_at": parsed["created_at"],
+                "status": p.get("status")
+            })
+        
+        return {
+            "status": "ok",
+            "count": len(parsed_payments),
+            "payments": parsed_payments
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =============================================================================
 # TRACKING EMAIL (via Gmail)
