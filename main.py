@@ -1643,6 +1643,26 @@ def sync_from_square(hours_back: int = 24):
         raise HTTPException(status_code=500, detail=f"Square sync error: {str(e)}")
 
 
+@app.get("/square/sync-now")
+def sync_from_square_get(hours_back: int = 48):
+    """
+    GET version of square sync for easy browser testing.
+    Default: last 48 hours of payments.
+    """
+    if not square_configured():
+        raise HTTPException(
+            status_code=400, 
+            detail="Square API not configured. Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID environment variables."
+        )
+    
+    try:
+        with get_db() as conn:
+            results = run_square_sync(conn, hours_back=hours_back)
+        return {"status": "ok", "results": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Square sync error: {str(e)}")
+
+
 @app.get("/square/test")
 def test_square_connection():
     """Test Square API connection and show sample payment data"""
