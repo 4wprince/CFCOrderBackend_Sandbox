@@ -1821,8 +1821,7 @@ def generate_comprehensive_summary(order_id: str):
             
             # Get shipments
             cur.execute("""
-                SELECT warehouse, ship_method, status, tracking_number, 
-                       shipping_cost, shipped_at, carrier_quote
+                SELECT warehouse, ship_method, status, tracking_number, shipped_at
                 FROM order_shipments 
                 WHERE order_id = %s
             """, (order_id,))
@@ -1871,8 +1870,6 @@ def generate_comprehensive_summary(order_id: str):
             ship_info = f"- {s.get('warehouse')}: {s.get('status', 'unknown')} via {s.get('ship_method', 'TBD')}"
             if s.get('tracking_number'):
                 ship_info += f" (Tracking: {s.get('tracking_number')})"
-            if s.get('shipping_cost'):
-                ship_info += f" (${s.get('shipping_cost')})"
             context_parts.append(ship_info)
     
     # Email history
