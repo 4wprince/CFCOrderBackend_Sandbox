@@ -3002,7 +3002,6 @@ def detect_payment_received(email_subject: str, email_body: str):
 def list_orders(
     status: Optional[str] = None,
     include_complete: bool = False,
-    exclude_test: bool = True,
     limit: int = 200
 ):
     """List orders with optional filters, including shipments"""
@@ -3018,14 +3017,6 @@ def list_orders(
             
             if not include_complete:
                 query += " AND NOT o.is_complete"
-            
-            if exclude_test:
-                # Filter out test orders based on notes or customer name
-                query += """ AND NOT (
-                    LOWER(COALESCE(o.notes, '')) LIKE '%test%' 
-                    OR LOWER(COALESCE(o.company_name, '')) LIKE '%test%'
-                    OR LOWER(COALESCE(o.customer_name, '')) LIKE '%test%'
-                )"""
             
             if status:
                 query += " AND s.current_status = %s"
@@ -4072,5 +4063,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
-
-# v5.11.1 - alert system
