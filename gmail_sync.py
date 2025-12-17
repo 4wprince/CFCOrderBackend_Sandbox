@@ -342,6 +342,33 @@ def extract_order_id(text):
     
     return None
 
+def extract_multiple_order_ids(text):
+    """
+    Extract multiple order IDs from text.
+    Handles patterns like "5317 & 5319", "5317/5319", "5317, 5319"
+    Returns list of order IDs.
+    """
+    order_ids = []
+    
+    # First look for combined patterns like "5317 & 5319" or "5317/5319"
+    combined_match = re.search(r'\b(\d{4,5})\s*[&/,]\s*(\d{4,5})\b', text)
+    if combined_match:
+        order_ids.append(combined_match.group(1))
+        order_ids.append(combined_match.group(2))
+        return order_ids
+    
+    # Look for all 4-5 digit numbers that look like order IDs
+    matches = re.findall(r'(?:order\s*#?\s*|#|PO\s*)(\d{4,5})\b', text, re.IGNORECASE)
+    if matches:
+        return list(set(matches))  # Remove duplicates
+    
+    # Fallback: single order ID
+    single = extract_order_id(text)
+    if single:
+        return [single]
+    
+    return []
+
 def extract_payment_amount(text):
     """Extract dollar amount from text"""
     match = re.search(r'\$([\d,]+\.?\d*)', text)
@@ -404,8 +431,9 @@ def run_gmail_sync(db_conn, hours_back=2):
                 if 'square.link' not in email['body'].lower():
                     continue
                 
-                order_id = extract_order_id(email['subject'] + ' ' + email['body'])
-                if order_id:
+                # Check for multiple order IDs (e.g., "5317 & 5319")
+                order_ids = extract_multiple_order_ids(email['subject'] + ' ' + email['body'])
+                for order_id in order_ids:
                     update_order_payment_link_sent(db_conn, order_id, email)
                     results["payment_links"] += 1
                     
@@ -691,7 +719,7 @@ def run_gmail_sync(db_conn, hours_back=2):
     results["shipped_detected"] = 0
     try:
         # Expanded search for shipping confirmation patterns
-        messages = search_emails(f'{time_filter} ("has tracking" OR "tracking #" OR "UPS tracking" OR "UPS label" OR "attaching" OR "ready for pick" OR "pickup" OR "pick up" OR "ready whenever" OR "on the way" OR "ship out today" OR "will ship" OR "shipped out" OR "Shipping Cost" OR "FedEx" OR "SAIA" OR "PRO #" OR "This is approved")')
+        messages = search_emails(f'{time_filter} ("has tracking" OR "tracking #" OR "UPS tracking" OR "UPS label" OR "attaching" OR "ready for pick" OR "pickup" OR "pick up" OR "ready whenever" OR "on the way" OR "ship out today" OR "will ship" OR "shipped out" OR "FedEx" OR "SAIA" OR "PRO #" OR "This is approved")')
         print(f"[GMAIL] Found {len(messages)} potential shipped indicator emails")
         
         for msg in messages:
@@ -751,12 +779,6 @@ def run_gmail_sync(db_conn, hours_back=2):
                 # "on the way via" carrier
                 elif 'on the way' in text:
                     source = 'on_the_way'
-                
-                # Shipping Cost $ (DL Cabinetry pattern)
-                elif 'shipping cost' in text:
-                    ship_match = re.search(r'shipping\s*cost\s*\$?([\d,.]+)', text, re.IGNORECASE)
-                    if ship_match:
-                        source = 'shipping_cost_confirmed'
                 
                 # Generic tracking mention with number
                 elif 'tracking' in text:
@@ -948,13 +970,58 @@ def update_order_payment_link_sent(conn, order_id, email):
         return True
 
 def match_payment_to_order(conn, amount, customer_name, email):
-    """Try to match a Square payment to an order"""
+    """Try to match a Square payment to an order. Handles combined payments like '5317 & 5319'"""
     from psycopg2.extras import RealDictCursor
     
     email_date = parse_email_date(email.get('date'))
+    email_text = email.get('subject', '') + ' ' + email.get('body', '')
+    
+    # First check if email mentions specific order IDs (handles "5317 & 5319" pattern)
+    order_ids = extract_multiple_order_ids(email_text)
     
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Try to find matching order by amount and customer name
+        # If we found order IDs in the email, mark them all as paid
+        if order_ids:
+            matched_any = False
+            for order_id in order_ids:
+                cur.execute("""
+                    SELECT order_id, payment_received FROM orders 
+                    WHERE order_id = %s AND payment_received = FALSE
+                """, (order_id,))
+                order = cur.fetchone()
+                
+                if order:
+                    # Split payment amount among orders (or just record full amount)
+                    split_amount = amount / len(order_ids) if len(order_ids) > 1 else amount
+                    
+                    cur.execute("""
+                        UPDATE orders SET 
+                            payment_received = TRUE,
+                            payment_received_at = COALESCE(%s, NOW()),
+                            payment_amount = %s,
+                            updated_at = NOW()
+                        WHERE order_id = %s
+                    """, (email_date, split_amount, order_id))
+                    
+                    cur.execute("""
+                        INSERT INTO order_events (order_id, event_type, event_data, source, created_at)
+                        VALUES (%s, 'payment_received', %s, 'gmail_sync', COALESCE(%s, NOW()))
+                    """, (order_id, json.dumps({
+                        'amount': split_amount, 
+                        'total_payment': amount,
+                        'combined_orders': order_ids,
+                        'customer': customer_name,
+                        'subject': email['subject'][:100]
+                    }), email_date))
+                    
+                    conn.commit()
+                    print(f"[GMAIL] Order {order_id}: payment ${split_amount} received (combined payment ${amount})")
+                    matched_any = True
+            
+            if matched_any:
+                return True
+        
+        # Fallback: Try to find matching order by amount and customer name
         cur.execute("""
             SELECT order_id, customer_name, company_name, order_total, payment_received
             FROM orders 
