@@ -1541,6 +1541,45 @@ def fix_historical_statuses():
             
     return {"status": "ok", "message": "Historical statuses fixed", "results": results}
 
+@app.get("/admin/complete-delivered-orders")
+def complete_delivered_orders():
+    """Mark orders as complete when ALL their shipments are delivered"""
+    results = {
+        "orders_completed": 0,
+        "order_ids": []
+    }
+    
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            # Find orders where ALL shipments are delivered and order is not complete
+            cur.execute("""
+                SELECT o.order_id
+                FROM orders o
+                WHERE o.is_complete = false
+                  AND EXISTS (SELECT 1 FROM order_shipments s WHERE s.order_id = o.order_id)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM order_shipments s 
+                      WHERE s.order_id = o.order_id 
+                      AND s.status != 'delivered'
+                  )
+            """)
+            orders_to_complete = [row[0] for row in cur.fetchall()]
+            
+            for order_id in orders_to_complete:
+                cur.execute("""
+                    UPDATE orders 
+                    SET is_complete = true, 
+                        completed_at = NOW(),
+                        updated_at = NOW()
+                    WHERE order_id = %s
+                """, (order_id,))
+                results["order_ids"].append(order_id)
+            
+            conn.commit()
+            results["orders_completed"] = len(orders_to_complete)
+            
+    return {"status": "ok", "message": "Delivered orders marked complete", "results": results}
+
 # =============================================================================
 # B2BWAVE SYNC ENDPOINTS
 # =============================================================================
