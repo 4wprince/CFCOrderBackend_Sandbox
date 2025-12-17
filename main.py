@@ -1635,7 +1635,6 @@ def auto_complete_shipped(days_threshold: int = 5):
                         UPDATE orders 
                         SET is_complete = true, 
                             completed_at = NOW(),
-                            current_status = 'complete',
                             updated_at = NOW()
                         WHERE order_id = %s
                     """, (order['order_id'],))
@@ -1713,7 +1712,6 @@ def archive_inactive_orders(days_threshold: int = 5):
                         UPDATE orders 
                         SET is_complete = true, 
                             completed_at = NOW(),
-                            current_status = 'complete',
                             updated_at = NOW()
                         WHERE order_id = %s
                     """, (order['order_id'],))

@@ -38,14 +38,14 @@ def reactivate_if_archived(conn, order_id, email, reason):
     with conn.cursor() as cur:
         # Check if order exists and is complete
         cur.execute("""
-            SELECT is_complete, current_status FROM orders WHERE order_id = %s
+            SELECT is_complete FROM orders WHERE order_id = %s
         """, (order_id,))
         row = cur.fetchone()
         
         if not row:
             return False  # Order doesn't exist
         
-        is_complete, current_status = row
+        is_complete = row[0]
         
         if not is_complete:
             return False  # Order is already active, nothing to do
@@ -57,7 +57,6 @@ def reactivate_if_archived(conn, order_id, email, reason):
             UPDATE orders 
             SET is_complete = FALSE,
                 completed_at = NULL,
-                current_status = 'awaiting_shipment',
                 updated_at = NOW()
             WHERE order_id = %s
         """, (order_id,))
@@ -76,8 +75,7 @@ def reactivate_if_archived(conn, order_id, email, reason):
             VALUES (%s, 'order_reactivated', %s, 'gmail_sync', COALESCE(%s, NOW()))
         """, (order_id, json.dumps({
             'reason': reason,
-            'email_subject': email.get('subject', '')[:100] if email else '',
-            'previous_status': current_status
+            'email_subject': email.get('subject', '')[:100] if email else ''
         }), email_date))
         
         conn.commit()
