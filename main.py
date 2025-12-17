@@ -1351,7 +1351,7 @@ def add_ai_summary_columns():
             
     return {"status": "ok", "results": results}
 
-@app.post("/admin/add-alert-columns")
+@app.post("/cfc-ops-7k9m2/add-alert-columns")
 def add_alert_columns():
     """Add alert_level and alert_type columns to orders table for UI display"""
     with get_db() as conn:
@@ -1571,7 +1571,7 @@ def init_db():
             cur.execute(SCHEMA_SQL)
     return {"status": "ok", "message": "Database schema initialized", "version": "5.6.1"}
 
-@app.get("/admin/fix-historical-statuses")
+@app.get("/cfc-ops-7k9m2/fix-historical-statuses")
 def fix_historical_statuses():
     """One-time fix: Update shipment statuses based on existing order data"""
     results = {
@@ -1606,7 +1606,7 @@ def fix_historical_statuses():
             
     return {"status": "ok", "message": "Historical statuses fixed", "results": results}
 
-@app.get("/admin/complete-delivered-orders")
+@app.get("/cfc-ops-7k9m2/complete-delivered-orders")
 def complete_delivered_orders():
     """Mark orders as complete when ALL their shipments are delivered"""
     results = {
@@ -1645,7 +1645,7 @@ def complete_delivered_orders():
             
     return {"status": "ok", "message": "Delivered orders marked complete", "results": results}
 
-@app.get("/admin/auto-complete-shipped")
+@app.get("/cfc-ops-7k9m2/auto-complete-shipped")
 def auto_complete_shipped(days_threshold: int = 5):
     """
     Auto-complete orders where ALL shipments are shipped and no activity for X days.
@@ -1727,7 +1727,7 @@ def auto_complete_shipped(days_threshold: int = 5):
             
     return {"status": "ok", "results": results}
 
-@app.get("/admin/archive-inactive-orders")
+@app.get("/cfc-ops-7k9m2/archive-inactive-orders")
 def archive_inactive_orders(days_threshold: int = 5):
     """
     Archive orders with no activity (emails/events) for X days.
@@ -1855,7 +1855,7 @@ def archive_inactive_orders(days_threshold: int = 5):
             
     return {"status": "ok", "results": results}
 
-@app.get("/admin/check-alerts")
+@app.get("/cfc-ops-7k9m2/check-alerts")
 def check_alerts():
     """
     Check for orders that need alerts:
@@ -2017,7 +2017,7 @@ def check_alerts():
     
     return {"status": "ok", "results": results}
 
-@app.get("/admin/apply-email-rules")
+@app.get("/cfc-ops-7k9m2/apply-email-rules")
 def apply_email_rules(hours_back: int = 720):
     """
     Apply email rules to detect delivered, shipped, canceled orders.
@@ -2144,7 +2144,7 @@ def apply_email_rules(hours_back: int = 720):
     
     return {"status": "ok", "results": results}
 
-@app.get("/admin/auto-complete-shipped")
+@app.get("/cfc-ops-7k9m2/auto-complete-shipped")
 def auto_complete_shipped_orders():
     """
     Auto-complete orders that were shipped 5+ days ago with no recent email activity.
