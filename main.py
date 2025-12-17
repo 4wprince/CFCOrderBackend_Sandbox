@@ -1588,6 +1588,89 @@ def complete_delivered_orders():
             
     return {"status": "ok", "message": "Delivered orders marked complete", "results": results}
 
+@app.get("/admin/auto-complete-shipped")
+def auto_complete_shipped(days_threshold: int = 5):
+    """
+    Auto-complete orders where ALL shipments are shipped and no activity for X days.
+    Uses order_events to track last activity.
+    """
+    results = {
+        "completed": [],
+        "skipped": []
+    }
+    
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Find orders where all shipments are shipped (not just delivered)
+            # and no email/event activity in the last X days
+            cur.execute("""
+                SELECT DISTINCT o.order_id, o.updated_at,
+                    (SELECT MAX(created_at) FROM order_events WHERE order_id = o.order_id) as last_event
+                FROM orders o
+                WHERE o.is_complete = false
+                  AND EXISTS (SELECT 1 FROM order_shipments s WHERE s.order_id = o.order_id)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM order_shipments s 
+                      WHERE s.order_id = o.order_id 
+                      AND s.status NOT IN ('shipped', 'delivered')
+                  )
+            """)
+            candidates = cur.fetchall()
+            
+            now = datetime.now(timezone.utc)
+            
+            for order in candidates:
+                last_activity = order['last_event'] or order['updated_at']
+                if last_activity:
+                    # Make timezone aware if needed
+                    if last_activity.tzinfo is None:
+                        last_activity = last_activity.replace(tzinfo=timezone.utc)
+                    days_since = (now - last_activity).days
+                else:
+                    days_since = 999
+                
+                if days_since >= days_threshold:
+                    # Auto-complete this order
+                    cur.execute("""
+                        UPDATE orders 
+                        SET is_complete = true, 
+                            completed_at = NOW(),
+                            current_status = 'complete',
+                            updated_at = NOW()
+                        WHERE order_id = %s
+                    """, (order['order_id'],))
+                    
+                    # Mark all shipments as delivered
+                    cur.execute("""
+                        UPDATE order_shipments 
+                        SET status = 'delivered',
+                            delivered_at = COALESCE(delivered_at, NOW())
+                        WHERE order_id = %s AND status = 'shipped'
+                    """, (order['order_id'],))
+                    
+                    cur.execute("""
+                        INSERT INTO order_events (order_id, event_type, event_data, source)
+                        VALUES (%s, 'auto_completed', %s, 'system')
+                    """, (order['order_id'], json.dumps({
+                        'days_since_activity': days_since,
+                        'threshold': days_threshold
+                    })))
+                    
+                    results["completed"].append({
+                        "order_id": order['order_id'],
+                        "days_since_activity": days_since
+                    })
+                else:
+                    results["skipped"].append({
+                        "order_id": order['order_id'],
+                        "days_since_activity": days_since,
+                        "days_remaining": days_threshold - days_since
+                    })
+            
+            conn.commit()
+            
+    return {"status": "ok", "results": results}
+
 @app.get("/admin/apply-email-rules")
 def apply_email_rules(hours_back: int = 720):
     """

@@ -307,6 +307,10 @@ def run_gmail_sync(db_conn, hours_back=2):
         "payments_received": 0,
         "rl_quotes": 0,
         "tracking_numbers": 0,
+        "rl_delivered": 0,
+        "saia_delivered": 0,
+        "shipped_detected": 0,
+        "canceled": 0,
         "errors": []
     }
     
@@ -510,6 +514,211 @@ def run_gmail_sync(db_conn, hours_back=2):
             results["errors"].append(f"LI invoice search error: {e}")
             print(f"[GMAIL-LI] LI invoice search error: {e}")
     
+    # Clean transaction state
+    try:
+        db_conn.rollback()
+    except:
+        pass
+    
+    # 6. R+L Carriers Delivered (marks shipment as delivered)
+    results["rl_delivered"] = 0
+    try:
+        messages = search_emails(f'{time_filter} from:rlcarriers "has been Delivered"')
+        print(f"[GMAIL] Found {len(messages)} R+L delivered emails")
+        
+        for msg in messages:
+            try:
+                email = get_email_content(msg['id'])
+                if not email:
+                    continue
+                
+                text = email['subject'] + ' ' + email['body']
+                
+                # Check for "has been Delivered" in subject
+                if 'has been delivered' not in text.lower():
+                    continue
+                
+                # Extract PRO number from subject (format: PRO I655817778)
+                pro_match = re.search(r'PRO\s+([A-Z]?\d{9,10})', text, re.IGNORECASE)
+                pro_number = pro_match.group(1) if pro_match else None
+                
+                # Extract MPO (order number) from body - "MPO 5247" or "MPO    5305"
+                mpo_match = re.search(r'MPO\s+(\d{4,5})', text, re.IGNORECASE)
+                if mpo_match:
+                    order_id = mpo_match.group(1)
+                    update_shipment_delivered(db_conn, order_id, None, pro_number, 'rl_delivered_email')
+                    results["rl_delivered"] += 1
+                    print(f"[GMAIL] R+L Delivered: Order {order_id}")
+                else:
+                    # Try extracting order from 4-digit number starting with 5 (likely order, not weight)
+                    order_match = re.search(r'\b(5\d{3})\b', text)
+                    if order_match:
+                        order_id = order_match.group(1)
+                        update_shipment_delivered(db_conn, order_id, None, pro_number, 'rl_delivered_email')
+                        results["rl_delivered"] += 1
+                        print(f"[GMAIL] R+L Delivered (inferred): Order {order_id}")
+                        
+            except Exception as e:
+                results["errors"].append(f"R+L delivered error: {e}")
+                try:
+                    db_conn.rollback()
+                except:
+                    pass
+                
+    except Exception as e:
+        results["errors"].append(f"R+L delivered search error: {e}")
+    
+    # Clean transaction state
+    try:
+        db_conn.rollback()
+    except:
+        pass
+    
+    # 7. SAIA Delivered
+    results["saia_delivered"] = 0
+    try:
+        messages = search_emails(f'{time_filter} (SAIA tracking delivered)')
+        print(f"[GMAIL] Found {len(messages)} SAIA emails")
+        
+        for msg in messages:
+            try:
+                email = get_email_content(msg['id'])
+                if not email:
+                    continue
+                
+                text = email['subject'] + ' ' + email['body']
+                
+                # SAIA tracking pattern (12 digits)
+                saia_match = re.search(r'SAIA\s+(\d{12})', text, re.IGNORECASE)
+                if saia_match:
+                    saia_tracking = saia_match.group(1)
+                    order_id = extract_order_id(text)
+                    if order_id:
+                        # Check if delivered
+                        if 'delivered' in text.lower():
+                            update_shipment_delivered(db_conn, order_id, None, f"SAIA {saia_tracking}", 'saia_delivered')
+                            results["saia_delivered"] += 1
+                        else:
+                            update_shipment_shipped(db_conn, order_id, None, f"SAIA {saia_tracking}", 'saia_tracking')
+                            
+            except Exception as e:
+                results["errors"].append(f"SAIA error: {e}")
+                try:
+                    db_conn.rollback()
+                except:
+                    pass
+                
+    except Exception as e:
+        results["errors"].append(f"SAIA search error: {e}")
+    
+    # Clean transaction state
+    try:
+        db_conn.rollback()
+    except:
+        pass
+    
+    # 8. Shipped indicators (various patterns that indicate order shipped)
+    results["shipped_detected"] = 0
+    try:
+        # Search for shipping confirmation patterns
+        messages = search_emails(f'{time_filter} ("has tracking" OR "UPS tracking" OR "UPS label" OR "ready for pick" OR "pickup code" OR "Shipping & Handling")')
+        print(f"[GMAIL] Found {len(messages)} potential shipped indicator emails")
+        
+        for msg in messages:
+            try:
+                email = get_email_content(msg['id'])
+                if not email:
+                    continue
+                
+                text = (email['subject'] + ' ' + email['body']).lower()
+                order_id = extract_order_id(email['subject'] + ' ' + email['body'])
+                
+                if not order_id:
+                    continue
+                
+                tracking_info = None
+                source = None
+                
+                # Check various shipped patterns
+                if 'has tracking' in text or 'tracking' in email['subject'].lower():
+                    # Look for tracking number in body
+                    tracking_match = re.search(r'(?:tracking|SAIA)\s+(\d{10,12})', email['body'], re.IGNORECASE)
+                    if tracking_match:
+                        tracking_info = tracking_match.group(1)
+                    source = 'has_tracking_email'
+                    
+                elif 'ups tracking' in text or 'ups label' in text:
+                    # UPS tracking
+                    ups_match = re.search(r'(1Z[A-Z0-9]{16})', email['body'])
+                    if ups_match:
+                        tracking_info = ups_match.group(1)
+                    source = 'ups_tracking_email'
+                    
+                elif 'ready for pick' in text or 'pickup code' in text:
+                    source = 'ready_for_pickup'
+                    
+                elif 'shipping & handling' in text:
+                    # DL Cabinetry pattern
+                    ship_match = re.search(r'shipping\s*&\s*handling\s*\$?([\d.]+)', text, re.IGNORECASE)
+                    if ship_match:
+                        source = 'dl_shipping_confirmation'
+                
+                elif 'please see' in text and 'attach' in text:
+                    source = 'attachment_shipped'
+                
+                if source:
+                    update_shipment_shipped(db_conn, order_id, None, tracking_info, source)
+                    results["shipped_detected"] += 1
+                    
+            except Exception as e:
+                results["errors"].append(f"Shipped detection error: {e}")
+                try:
+                    db_conn.rollback()
+                except:
+                    pass
+                
+    except Exception as e:
+        results["errors"].append(f"Shipped detection search error: {e}")
+    
+    # Clean transaction state
+    try:
+        db_conn.rollback()
+    except:
+        pass
+    
+    # 9. Cancel detection
+    results["canceled"] = 0
+    try:
+        messages = search_emails(f'{time_filter} (cancel OR canceled OR cancelled) order')
+        print(f"[GMAIL] Found {len(messages)} potential cancel emails")
+        
+        for msg in messages:
+            try:
+                email = get_email_content(msg['id'])
+                if not email:
+                    continue
+                
+                text = (email['subject'] + ' ' + email['body']).lower()
+                
+                # Must have cancel keyword
+                if 'cancel' not in text:
+                    continue
+                
+                order_id = extract_order_id(email['subject'] + ' ' + email['body'])
+                if order_id:
+                    mark_order_canceled(db_conn, order_id, 'Email mentioned cancel')
+                    results["canceled"] += 1
+                    
+            except Exception as e:
+                results["errors"].append(f"Cancel detection error: {e}")
+                try:
+                    db_conn.rollback()
+                except:
+                    pass
+                
+    except Exception as e:
+        results["errors"].append(f"Cancel search error: {e}")
+    
     print(f"[GMAIL] Sync complete: {results}")
     return results
 
@@ -681,4 +890,127 @@ def update_li_shipment_delivered(conn, order_id, email):
         
         conn.commit()
         print(f"[GMAIL] Order {order_id}: LI shipment marked delivered (invoice received)")
+        return True
+
+def update_shipment_delivered(conn, order_id, warehouse, tracking_info, source_detail):
+    """Mark any shipment as delivered"""
+    with conn.cursor() as cur:
+        # Check if shipment exists
+        cur.execute("""
+            SELECT id, status FROM order_shipments 
+            WHERE order_id = %s AND warehouse = %s
+        """, (order_id, warehouse))
+        
+        row = cur.fetchone()
+        if not row:
+            # Try without warehouse (mark first undelivered shipment)
+            cur.execute("""
+                SELECT id, status, warehouse FROM order_shipments 
+                WHERE order_id = %s AND status != 'delivered'
+                ORDER BY id LIMIT 1
+            """, (order_id,))
+            row = cur.fetchone()
+            if row:
+                warehouse = row[2]
+            else:
+                print(f"[GMAIL] No shipment found for order {order_id}")
+                return False
+        
+        shipment_id, current_status = row[0], row[1]
+        
+        if current_status == 'delivered':
+            return False
+        
+        cur.execute("""
+            UPDATE order_shipments 
+            SET status = 'delivered',
+                delivered_at = NOW(),
+                updated_at = NOW(),
+                tracking_number = COALESCE(tracking_number, %s)
+            WHERE order_id = %s AND warehouse = %s
+        """, (tracking_info, order_id, warehouse))
+        
+        cur.execute("""
+            INSERT INTO order_events (order_id, event_type, event_data, source)
+            VALUES (%s, 'shipment_delivered', %s, 'gmail_sync')
+        """, (order_id, json.dumps({
+            'warehouse': warehouse,
+            'tracking': tracking_info,
+            'source': source_detail
+        })))
+        
+        conn.commit()
+        print(f"[GMAIL] Order {order_id}: {warehouse} shipment marked delivered")
+        return True
+
+def update_shipment_shipped(conn, order_id, warehouse, tracking_info, source_detail):
+    """Mark shipment as shipped"""
+    with conn.cursor() as cur:
+        # If warehouse specified, use it
+        if warehouse:
+            cur.execute("""
+                SELECT id, status FROM order_shipments 
+                WHERE order_id = %s AND warehouse = %s
+            """, (order_id, warehouse))
+        else:
+            # Find first unshipped shipment
+            cur.execute("""
+                SELECT id, status, warehouse FROM order_shipments 
+                WHERE order_id = %s AND status NOT IN ('shipped', 'delivered')
+                ORDER BY id LIMIT 1
+            """, (order_id,))
+        
+        row = cur.fetchone()
+        if not row:
+            print(f"[GMAIL] No shipment found for order {order_id}")
+            return False
+        
+        if not warehouse:
+            warehouse = row[2] if len(row) > 2 else None
+        
+        current_status = row[1]
+        if current_status in ('shipped', 'delivered'):
+            return False
+        
+        cur.execute("""
+            UPDATE order_shipments 
+            SET status = 'shipped',
+                shipped_at = NOW(),
+                updated_at = NOW(),
+                tracking_number = COALESCE(tracking_number, %s)
+            WHERE order_id = %s AND warehouse = %s
+        """, (tracking_info, order_id, warehouse))
+        
+        cur.execute("""
+            INSERT INTO order_events (order_id, event_type, event_data, source)
+            VALUES (%s, 'shipment_shipped', %s, 'gmail_sync')
+        """, (order_id, json.dumps({
+            'warehouse': warehouse,
+            'tracking': tracking_info,
+            'source': source_detail
+        })))
+        
+        conn.commit()
+        print(f"[GMAIL] Order {order_id}: {warehouse} shipment marked shipped")
+        return True
+
+def mark_order_canceled(conn, order_id, reason):
+    """Mark order as canceled"""
+    with conn.cursor() as cur:
+        cur.execute("""
+            UPDATE orders 
+            SET is_complete = TRUE,
+                completed_at = NOW(),
+                notes = CONCAT(COALESCE(notes, ''), ' [CANCELED: ', %s, ']'),
+                updated_at = NOW()
+            WHERE order_id = %s
+        """, (reason, order_id))
+        
+        cur.execute("""
+            INSERT INTO order_events (order_id, event_type, event_data, source)
+            VALUES (%s, 'order_canceled', %s, 'gmail_sync')
+        """, (order_id, json.dumps({'reason': reason})))
+        
+        conn.commit()
+        print(f"[GMAIL] Order {order_id}: marked canceled - {reason}")
         return True
