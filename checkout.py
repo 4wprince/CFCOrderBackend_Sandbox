@@ -5,6 +5,7 @@ B2BWave order checkout with R+L shipping quotes and Square payment
 
 import os
 import json
+import base64
 import urllib.request
 import urllib.error
 import hmac
