@@ -2774,6 +2774,16 @@ CHECKOUT_BASE_URL = os.environ.get("CHECKOUT_BASE_URL", "").strip()
 GMAIL_SEND_ENABLED = os.environ.get("GMAIL_SEND_ENABLED", "false").lower() == "true"
 
 
+@app.get("/checkout-status")
+def checkout_status():
+    """Debug endpoint to check checkout configuration"""
+    return {
+        "checkout_enabled": CHECKOUT_ENABLED,
+        "checkout_base_url": CHECKOUT_BASE_URL or "(not set)",
+        "gmail_send_enabled": GMAIL_SEND_ENABLED
+    }
+
+
 class CheckoutRequest(BaseModel):
     order_id: str
     shipping_address: Optional[dict] = None
