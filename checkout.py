@@ -254,9 +254,39 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
         
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode())
-            # API returns a list, get first item
+            # API returns a list of {order: {...}} objects
             if isinstance(data, list) and len(data) > 0:
-                return data[0]
+                # Extract the order from the nested structure
+                raw_order = data[0].get('order', data[0])
+                
+                # Normalize the data structure for our checkout flow
+                order_products = raw_order.get('order_products', [])
+                line_items = []
+                for op in order_products:
+                    product = op.get('order_product', op)
+                    line_items.append({
+                        'sku': product.get('product_code', ''),
+                        'name': product.get('product_name', ''),
+                        'quantity': int(float(product.get('quantity', 1))),
+                        'price': float(product.get('price', 0)),
+                    })
+                
+                return {
+                    'id': raw_order.get('id'),
+                    'customer_name': raw_order.get('customer_name'),
+                    'customer_email': raw_order.get('customer_email'),
+                    'company_name': raw_order.get('customer_company'),
+                    'line_items': line_items,
+                    'subtotal': float(raw_order.get('gross_total', 0)),
+                    'shipping_address': {
+                        'address': raw_order.get('address', ''),
+                        'city': raw_order.get('city', ''),
+                        'state': raw_order.get('province', ''),
+                        'zip': raw_order.get('postal_code', ''),
+                        'country': raw_order.get('country', 'US'),
+                    },
+                    'comments': raw_order.get('comments_customer', ''),
+                }
             return None
             
     except Exception as e:
