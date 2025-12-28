@@ -1115,6 +1115,27 @@ def root():
 def health():
     return {"status": "ok", "version": "5.9.1"}
 
+@app.post("/create-pending-checkouts-table")
+def create_pending_checkouts_table():
+    """Create pending_checkouts table for B2BWave checkout flow"""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pending_checkouts (
+                    order_id VARCHAR(50) PRIMARY KEY,
+                    customer_email VARCHAR(255),
+                    checkout_token VARCHAR(100),
+                    payment_link TEXT,
+                    payment_amount DECIMAL(10, 2),
+                    payment_initiated_at TIMESTAMP WITH TIME ZONE,
+                    payment_completed_at TIMESTAMP WITH TIME ZONE,
+                    transaction_id VARCHAR(100),
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
+    return {"status": "ok", "message": "pending_checkouts table created"}
+
+
 @app.post("/create-shipments-table")
 def create_shipments_table():
     """Create order_shipments table without resetting other tables"""
@@ -3109,5 +3130,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
-
-# end
