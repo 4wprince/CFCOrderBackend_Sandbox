@@ -297,6 +297,11 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
 def create_square_payment_link(amount_cents: int, order_id: str, customer_email: str) -> Optional[str]:
     """Create a Square payment link for the order"""
     if not SQUARE_ACCESS_TOKEN:
+        print("[SQUARE] No access token configured")
+        return None
+    
+    if not SQUARE_LOCATION_ID:
+        print("[SQUARE] No location ID configured")
         return None
     
     try:
@@ -314,16 +319,22 @@ def create_square_payment_link(amount_cents: int, order_id: str, customer_email:
                 },
                 "location_id": SQUARE_LOCATION_ID
             },
-            "checkout_options": {
-                "redirect_url": f"{CHECKOUT_BASE_URL}/payment-complete?order={order_id}",
-                "ask_for_shipping_address": False
-            },
             "pre_populated_data": {
                 "buyer_email": customer_email
-            }
+            } if customer_email else {}
         }
         
+        # Only add redirect_url if CHECKOUT_BASE_URL is set
+        if CHECKOUT_BASE_URL:
+            payload["checkout_options"] = {
+                "redirect_url": f"{CHECKOUT_BASE_URL}/payment-complete?order={order_id}",
+                "ask_for_shipping_address": False
+            }
+        
         data = json.dumps(payload).encode()
+        
+        print(f"[SQUARE] Creating payment link: {url}")
+        print(f"[SQUARE] Payload: {payload}")
         
         req = urllib.request.Request(url, data=data, method='POST')
         req.add_header('Authorization', f'Bearer {SQUARE_ACCESS_TOKEN}')
@@ -332,8 +343,13 @@ def create_square_payment_link(amount_cents: int, order_id: str, customer_email:
         
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode())
+            print(f"[SQUARE] Response: {result}")
             return result.get('payment_link', {}).get('url')
             
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        print(f"[SQUARE] HTTP Error {e.code}: {error_body}")
+        return None
     except Exception as e:
         print(f"[SQUARE] Error creating payment link: {e}")
         return None
