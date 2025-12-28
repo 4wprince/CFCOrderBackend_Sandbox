@@ -2821,6 +2821,37 @@ def b2bwave_order_webhook(payload: dict):
     }
 
 
+@app.get("/checkout/payment-complete")
+def payment_complete(order: str, transactionId: Optional[str] = None):
+    """
+    Payment completion callback from Square.
+    """
+    # Mark checkout as complete
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE pending_checkouts 
+                SET payment_completed_at = NOW(), transaction_id = %s
+                WHERE order_id = %s
+            """, (transactionId, order))
+            
+            # Also update the main order if it exists
+            cur.execute("""
+                UPDATE orders 
+                SET payment_received = TRUE, 
+                    payment_received_at = NOW(),
+                    payment_method = 'Square Checkout',
+                    updated_at = NOW()
+                WHERE order_id = %s
+            """, (order,))
+    
+    return {
+        "status": "ok",
+        "message": "Payment completed",
+        "order_id": order
+    }
+
+
 @app.get("/checkout/{order_id}")
 def get_checkout_data(order_id: str, token: str):
     """
@@ -2908,37 +2939,6 @@ def create_checkout_payment(order_id: str, token: str):
         "status": "ok",
         "payment_url": payment_url,
         "amount": grand_total
-    }
-
-
-@app.get("/checkout/payment-complete")
-def payment_complete(order: str, transactionId: Optional[str] = None):
-    """
-    Payment completion callback from Square.
-    """
-    # Mark checkout as complete
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE pending_checkouts 
-                SET payment_completed_at = NOW(), transaction_id = %s
-                WHERE order_id = %s
-            """, (transactionId, order))
-            
-            # Also update the main order if it exists
-            cur.execute("""
-                UPDATE orders 
-                SET payment_received = TRUE, 
-                    payment_received_at = NOW(),
-                    payment_method = 'Square Checkout',
-                    updated_at = NOW()
-                WHERE order_id = %s
-            """, (order,))
-    
-    return {
-        "status": "ok",
-        "message": "Payment completed",
-        "order_id": order
     }
 
 
