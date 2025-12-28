@@ -242,7 +242,8 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
         return None
     
     try:
-        url = f"{B2BWAVE_URL}/api/orders/{order_id}.json"
+        # Use list endpoint with filter (same as main.py)
+        url = f"{B2BWAVE_URL}/api/orders.json?id_eq={order_id}"
         
         # Basic auth
         credentials = f"{B2BWAVE_USERNAME}:{B2BWAVE_API_KEY}"
@@ -252,7 +253,11 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
         req.add_header('Authorization', f'Basic {encoded_credentials}')
         
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode())
+            data = json.loads(resp.read().decode())
+            # API returns a list, get first item
+            if isinstance(data, list) and len(data) > 0:
+                return data[0]
+            return None
             
     except Exception as e:
         print(f"[B2BWAVE] Error fetching order {order_id}: {e}")
