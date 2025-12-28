@@ -3131,6 +3131,10 @@ def checkout_ui(order_id: str, token: str):
             if (shipping.shipments && shipping.shipments.length > 0) {{
                 shipping.shipments.forEach(ship => {{
                     const quoteOk = ship.quote && ship.quote.success;
+                    const methodLabel = ship.shipping_method === 'small_package' ? '📦 UPS/USPS' : '🚚 LTL Freight';
+                    const methodNote = ship.shipping_method === 'small_package' ? 
+                        (ship.quote && ship.quote.cheapest ? `via ${{ship.quote.cheapest.provider}} ${{ship.quote.cheapest.service}}` : '') :
+                        '(R+L Carriers)';
                     html += `
                         <div class="shipment">
                             <div class="shipment-header">📦 From: ${{ship.warehouse_name}} (${{ship.origin_zip}})</div>
@@ -3140,7 +3144,7 @@ def checkout_ui(order_id: str, token: str):
                             </div>
                             <div class="shipment-detail" style="margin-top:8px;">
                                 ${{quoteOk ? 
-                                    `<strong>Shipping: $${{ship.shipping_cost.toFixed(2)}}</strong>` : 
+                                    `<strong>Shipping: $${{ship.shipping_cost.toFixed(2)}}</strong> <span style="color:#666; font-size:0.9em;">${{methodLabel}} ${{methodNote}}</span>` : 
                                     `<span style="color:#c00">Quote unavailable</span>`
                                 }}
                             </div>
@@ -3148,7 +3152,11 @@ def checkout_ui(order_id: str, token: str):
                     `;
                 }});
                 
-                html += `<div class="residential-note">🏠 Residential delivery includes liftgate service</div>`;
+                // Show residential note only for LTL shipments
+                const hasLtl = shipping.shipments.some(s => s.shipping_method === 'ltl');
+                if (hasLtl) {{
+                    html += `<div class="residential-note">🏠 Residential delivery includes liftgate service</div>`;
+                }}
             }}
             
             // Totals

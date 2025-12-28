@@ -147,9 +147,77 @@ def get_shipping_quote(origin_zip: str, dest_zip: str, weight: float, is_residen
         return {'success': False, 'error': str(e)}
 
 
+# =============================================================================
+# SHIPPING METHOD SELECTION
+# =============================================================================
+# 
+# FUTURE RULES (placeholder for RTA database integration):
+# - Weight-based: under X lbs → small package, over → LTL
+# - Size-based: items over 96" length → LTL or manual
+# - Product-based: trim items may need special handling
+# - Value-based: high-value orders may need signature/insurance
+# - Destination-based: some areas may have carrier restrictions
+#
+# For now: Simple 70 lb cutoff
+# Under 70 lbs → Shippo (UPS/USPS small package)
+# 70 lbs and over → R+L (LTL freight)
+# =============================================================================
+
+SMALL_PACKAGE_WEIGHT_LIMIT = 70  # lbs - orders under this use Shippo
+
+
+def get_shippo_quote(origin_zip: str, dest_zip: str, weight: float, is_residential: bool = True) -> Dict:
+    """Get small package shipping quote from Shippo API"""
+    try:
+        shippo_url = os.environ.get("SHIPPO_API_URL", "").strip()
+        if not shippo_url:
+            # Use our backend's Shippo endpoint
+            shippo_url = os.environ.get("CFC_BACKEND_URL", "https://cfcorderbackend-sandbox.onrender.com").strip()
+        
+        url = f"{shippo_url}/shippo/rates"
+        params = {
+            'origin_zip': origin_zip,
+            'dest_zip': dest_zip,
+            'weight_lbs': weight,
+            'is_residential': 'true' if is_residential else 'false'
+        }
+        
+        query_string = '&'.join(f"{k}={v}" for k, v in params.items())
+        full_url = f"{url}?{query_string}"
+        
+        req = urllib.request.Request(full_url)
+        
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+            return data
+            
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def select_shipping_method(weight: float, items: list) -> str:
+    """
+    Determine which shipping method to use based on weight and items.
+    
+    Returns: 'small_package' or 'ltl'
+    
+    FUTURE: Add rules for:
+    - Oversized items (96"+ length)
+    - Specific product codes
+    - Fragile items
+    - etc.
+    """
+    # Simple rule for now: 70 lb cutoff
+    if weight < SMALL_PACKAGE_WEIGHT_LIMIT:
+        return 'small_package'
+    else:
+        return 'ltl'
+
+
 def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
     """
-    Calculate shipping for an entire order, grouped by warehouse
+    Calculate shipping for an entire order, grouped by warehouse.
+    Uses Shippo for small packages (<70 lbs) and R+L for LTL (70+ lbs).
     
     Returns:
         {
@@ -182,7 +250,8 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
                 'warehouse_name': 'Unknown Warehouse',
                 'items': items,
                 'quote': {'success': False, 'error': 'Could not determine warehouse for items'},
-                'shipping_cost': 0
+                'shipping_cost': 0,
+                'shipping_method': 'unknown'
             })
             continue
         
@@ -194,18 +263,37 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
         weight = calculate_shipment_weight(items)
         oversized = any(is_oversized(item.get('name', '')) for item in items)
         
-        # Get quote
-        quote = get_shipping_quote(
-            origin_zip=warehouse['zip'],
-            dest_zip=dest_zip,
-            weight=weight,
-            is_residential=is_residential,
-            is_oversized=oversized
-        )
+        # Select shipping method based on weight (and future rules)
+        shipping_method = select_shipping_method(weight, items)
         
-        shipping_cost = 0
-        if quote.get('success') and quote.get('quote'):
-            shipping_cost = quote['quote'].get('customer_price', 0)
+        # Get quote from appropriate carrier
+        if shipping_method == 'small_package':
+            # Use Shippo for small packages
+            quote = get_shippo_quote(
+                origin_zip=warehouse['zip'],
+                dest_zip=dest_zip,
+                weight=weight,
+                is_residential=is_residential
+            )
+            
+            shipping_cost = 0
+            if quote.get('success') and quote.get('cheapest'):
+                shipping_cost = quote['cheapest'].get('amount', 0)
+                # Add markup for small package (optional - adjust as needed)
+                # shipping_cost = shipping_cost * 1.1  # 10% markup
+        else:
+            # Use R+L for LTL freight
+            quote = get_shipping_quote(
+                origin_zip=warehouse['zip'],
+                dest_zip=dest_zip,
+                weight=weight,
+                is_residential=is_residential,
+                is_oversized=oversized
+            )
+            
+            shipping_cost = 0
+            if quote.get('success') and quote.get('quote'):
+                shipping_cost = quote['quote'].get('customer_price', 0)
         
         shipments.append({
             'warehouse': warehouse_code,
@@ -214,6 +302,7 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
             'items': items,
             'weight': weight,
             'is_oversized': oversized,
+            'shipping_method': shipping_method,
             'quote': quote,
             'shipping_cost': shipping_cost
         })
