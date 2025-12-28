@@ -2795,6 +2795,16 @@ def checkout_status():
     }
 
 
+@app.get("/debug/b2bwave-raw/{order_id}")
+def debug_b2bwave_raw(order_id: str):
+    """Debug endpoint to see raw B2BWave API response"""
+    try:
+        data = b2bwave_api_request("orders", {"id_eq": order_id})
+        return {"status": "ok", "raw_response": data}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 class CheckoutRequest(BaseModel):
     order_id: str
     shipping_address: Optional[dict] = None
