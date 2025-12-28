@@ -64,6 +64,9 @@ B2BWAVE_API_KEY = os.environ.get("B2BWAVE_API_KEY", "").strip()
 # Anthropic API Config
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
+# Shippo API Config
+SHIPPO_API_KEY = os.environ.get("SHIPPO_API_KEY", "").strip()
+
 # Auto-sync config
 AUTO_SYNC_INTERVAL_MINUTES = 15
 AUTO_SYNC_DAYS_BACK = 7
@@ -1510,6 +1513,64 @@ def square_status():
         "configured": square_configured(),
         "message": "Square API configured" if square_configured() else "Set SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID environment variables"
     }
+
+
+# =============================================================================
+# SHIPPO - Small Package Shipping Rates
+# =============================================================================
+
+# Import Shippo module
+try:
+    from shippo_rates import get_shipping_rates, get_simple_rate, validate_address, test_shippo
+    SHIPPO_ENABLED = bool(SHIPPO_API_KEY)
+except ImportError as e:
+    print(f"[STARTUP] shippo_rates module not found: {e}")
+    SHIPPO_ENABLED = False
+
+
+@app.get("/shippo/status")
+def shippo_status():
+    """Check Shippo API configuration status"""
+    return {
+        "configured": SHIPPO_ENABLED,
+        "api_key_set": bool(SHIPPO_API_KEY),
+        "message": "Shippo API configured" if SHIPPO_ENABLED else "Set SHIPPO_API_KEY environment variable"
+    }
+
+
+@app.get("/shippo/rates")
+def get_shippo_rates(
+    origin_zip: str,
+    dest_zip: str,
+    weight_lbs: float,
+    is_residential: bool = True
+):
+    """
+    Get small package shipping rates from Shippo.
+    
+    Example: /shippo/rates?origin_zip=30071&dest_zip=33859&weight_lbs=10
+    """
+    if not SHIPPO_ENABLED:
+        raise HTTPException(status_code=503, detail="Shippo API not configured")
+    
+    result = get_simple_rate(
+        origin_zip=origin_zip,
+        dest_zip=dest_zip,
+        weight_lbs=weight_lbs,
+        is_residential=is_residential
+    )
+    
+    return result
+
+
+@app.post("/shippo/test")
+def test_shippo_api():
+    """Test Shippo API connection"""
+    if not SHIPPO_ENABLED:
+        raise HTTPException(status_code=503, detail="Shippo API not configured")
+    
+    result = test_shippo()
+    return result
 
 
 @app.get("/b2bwave/order/{order_id}")
