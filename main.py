@@ -2777,10 +2777,21 @@ GMAIL_SEND_ENABLED = os.environ.get("GMAIL_SEND_ENABLED", "false").lower() == "t
 @app.get("/checkout-status")
 def checkout_status():
     """Debug endpoint to check checkout configuration"""
+    # Import the checkout module's config to see what it has
+    try:
+        from checkout import B2BWAVE_URL as CHECKOUT_B2BWAVE_URL
+        from checkout import B2BWAVE_USERNAME as CHECKOUT_B2BWAVE_USERNAME
+        from checkout import B2BWAVE_API_KEY as CHECKOUT_B2BWAVE_API_KEY
+        checkout_b2bwave = f"{CHECKOUT_B2BWAVE_URL} / {CHECKOUT_B2BWAVE_USERNAME} / {'set' if CHECKOUT_B2BWAVE_API_KEY else 'not set'}"
+    except:
+        checkout_b2bwave = "import failed"
+    
     return {
         "checkout_enabled": CHECKOUT_ENABLED,
         "checkout_base_url": CHECKOUT_BASE_URL or "(not set)",
-        "gmail_send_enabled": GMAIL_SEND_ENABLED
+        "gmail_send_enabled": GMAIL_SEND_ENABLED,
+        "checkout_b2bwave_config": checkout_b2bwave,
+        "main_b2bwave_url": B2BWAVE_URL or "(not set)"
     }
 
 
