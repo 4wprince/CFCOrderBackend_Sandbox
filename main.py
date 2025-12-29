@@ -1629,15 +1629,16 @@ def rta_get_sku(sku: str):
 
 
 @app.post("/rta/calculate-weight")
-def rta_calculate_weight(line_items: list):
+def rta_calculate_weight(request: dict):
     """
     Calculate total weight and check for long pallet items.
     
-    Body: [{"sku": "NJGR-WF342", "quantity": 1}, ...]
+    Body: {"line_items": [{"sku": "NJGR-WF342", "quantity": 1}, ...]}
     """
     if not RTA_DB_ENABLED:
         raise HTTPException(status_code=503, detail="RTA database module not loaded")
     
+    line_items = request.get("line_items", [])
     result = calculate_order_weight_and_flags(line_items)
     return result
 

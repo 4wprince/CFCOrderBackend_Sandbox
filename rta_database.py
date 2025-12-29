@@ -250,6 +250,11 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
     """
     Calculate total weight and check for long pallet items in an order.
     
+    Weight Priority:
+    1. RTA database (SKU-level weights) - most accurate
+    2. Cubic feet estimate based on dimensions
+    3. Fallback: 30 lbs per item
+    
     Args:
         line_items: List of {'sku': 'XXX-B12', 'quantity': 2, ...}
     
@@ -285,6 +290,21 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
         
         if info:
             weight = info.get('weight') or 0
+            
+            # If weight is 0 but we have dimensions, estimate from cubic feet
+            # Formula: ~10 lbs per cubic foot for RTA cabinets
+            if weight == 0:
+                width = info.get('width') or 0
+                height = info.get('height') or 0
+                depth = info.get('depth') or 24  # Default 24" depth
+                if width > 0 and height > 0:
+                    cubic_inches = width * height * depth
+                    cubic_feet = cubic_inches / 1728  # 12^3 = 1728 cubic inches per cubic foot
+                    weight = cubic_feet * 10  # ~10 lbs per cubic foot
+                    weight = max(weight, 5)  # Minimum 5 lbs
+                else:
+                    weight = 30  # Fallback
+            
             line_weight = weight * qty
             total_weight += line_weight
             
@@ -295,8 +315,8 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
             items_with_info.append({
                 'sku': sku,
                 'quantity': qty,
-                'weight': weight,
-                'line_weight': line_weight,
+                'weight': round(weight, 2),
+                'line_weight': round(line_weight, 2),
                 'requires_long_pallet': info.get('requires_long_pallet', False),
                 'product_code': info.get('product_code'),
                 'height': info.get('height'),
