@@ -246,13 +246,58 @@ def get_skus_info(skus: List[str]) -> Dict[str, Dict]:
             return {row['product_sku']: dict(row) for row in rows}
 
 
+def estimate_weight_from_dimensions(product_code: str, height: float, width: float, depth: float) -> float:
+    """
+    Estimate weight based on product type and dimensions when no weight data available.
+    
+    Rules:
+    - Trim (fillers, scribe, molding, toe kick): 0.5 lbs per linear foot (height/12)
+    - Ref/Skin Panels: 1.5 lbs per square foot (height × width / 144)
+    - Cabinets: ~10 lbs per cubic foot
+    """
+    product_code_upper = (product_code or '').upper()
+    height = height or 0
+    width = width or 0
+    depth = depth or 24  # Default 24" depth for cabinets
+    
+    # Trim items: fillers, scribe, molding, toe kick, crown
+    trim_keywords = ['FILLER', 'SCRIBE', 'MOLDING', 'CROWN', 'TOE', 'TRIM']
+    if any(kw in product_code_upper for kw in trim_keywords):
+        # 0.5 lbs per linear foot (use height as length)
+        linear_feet = height / 12 if height > 0 else 8  # Default 8 ft if no height
+        weight = linear_feet * 0.5
+        return max(weight, 1)  # Minimum 1 lb
+    
+    # Panels: ref panels, skin panels, base panels
+    panel_keywords = ['PANEL', 'SKIN', 'REF']
+    if any(kw in product_code_upper for kw in panel_keywords):
+        # 1.5 lbs per square foot
+        if height > 0 and width > 0:
+            square_feet = (height * width) / 144  # Convert sq inches to sq feet
+            weight = square_feet * 1.5
+            return max(weight, 2)  # Minimum 2 lbs
+        else:
+            # Default 8ft × 2ft panel = 24 lbs
+            return 24
+    
+    # Cabinets: ~10 lbs per cubic foot
+    if width > 0 and height > 0:
+        cubic_inches = width * height * depth
+        cubic_feet = cubic_inches / 1728  # 12^3 = 1728 cubic inches per cubic foot
+        weight = cubic_feet * 10
+        return max(weight, 5)  # Minimum 5 lbs
+    
+    # Ultimate fallback
+    return 30
+
+
 def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
     """
     Calculate total weight and check for long pallet items in an order.
     
     Weight Priority:
     1. RTA database (SKU-level weights) - most accurate
-    2. Cubic feet estimate based on dimensions
+    2. Product-type specific estimate based on dimensions
     3. Fallback: 30 lbs per item
     
     Args:
@@ -291,19 +336,14 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
         if info:
             weight = info.get('weight') or 0
             
-            # If weight is 0 but we have dimensions, estimate from cubic feet
-            # Formula: ~10 lbs per cubic foot for RTA cabinets
+            # If weight is 0 but we have dimensions, estimate based on product type
             if weight == 0:
-                width = info.get('width') or 0
-                height = info.get('height') or 0
-                depth = info.get('depth') or 24  # Default 24" depth
-                if width > 0 and height > 0:
-                    cubic_inches = width * height * depth
-                    cubic_feet = cubic_inches / 1728  # 12^3 = 1728 cubic inches per cubic foot
-                    weight = cubic_feet * 10  # ~10 lbs per cubic foot
-                    weight = max(weight, 5)  # Minimum 5 lbs
-                else:
-                    weight = 30  # Fallback
+                weight = estimate_weight_from_dimensions(
+                    info.get('product_code', ''),
+                    info.get('height', 0),
+                    info.get('width', 0),
+                    info.get('depth', 24)
+                )
             
             line_weight = weight * qty
             total_weight += line_weight
@@ -323,16 +363,17 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
                 'width': info.get('width')
             })
         else:
-            # SKU not found - use estimate
-            missing_skus.append(sku)
-            estimated_weight = 30 * qty  # 30 lbs per item estimate
+            # SKU not found - estimate based on item name if available
+            item_name = item.get('name', '')
+            estimated_weight = estimate_weight_from_name(item_name, qty)
             total_weight += estimated_weight
+            missing_skus.append(sku)
             
             items_with_info.append({
                 'sku': sku,
                 'quantity': qty,
-                'weight': 30,  # estimate
-                'line_weight': estimated_weight,
+                'weight': round(estimated_weight / qty, 2),
+                'line_weight': round(estimated_weight, 2),
                 'requires_long_pallet': False,
                 'estimated': True
             })
@@ -344,6 +385,36 @@ def calculate_order_weight_and_flags(line_items: List[Dict]) -> Dict:
         'missing_skus': missing_skus,
         'items': items_with_info
     }
+
+
+def estimate_weight_from_name(item_name: str, qty: int) -> float:
+    """
+    Estimate weight when SKU not found, based on item name.
+    Used as last resort fallback.
+    """
+    name_upper = (item_name or '').upper()
+    
+    # Trim items: 0.5 lbs per linear foot, assume 8ft default
+    trim_keywords = ['FILLER', 'SCRIBE', 'MOLDING', 'CROWN', 'TOE', 'TRIM']
+    if any(kw in name_upper for kw in trim_keywords):
+        # Try to extract height from name (e.g., "42 Inch" or "96")
+        import re
+        height_match = re.search(r'(\d+)\s*(INCH|IN|"|\s*$)', name_upper)
+        if height_match:
+            height_inches = int(height_match.group(1))
+            linear_feet = height_inches / 12
+        else:
+            linear_feet = 8  # Default 8 ft
+        weight_per_item = linear_feet * 0.5
+        return max(weight_per_item * qty, 1)
+    
+    # Panels: 1.5 lbs per sq ft, default 8x2 = 24 lbs
+    panel_keywords = ['PANEL', 'SKIN', 'REF']
+    if any(kw in name_upper for kw in panel_keywords):
+        return 24 * qty
+    
+    # Default cabinet weight
+    return 30 * qty
 
 
 def get_rta_stats() -> Dict:
