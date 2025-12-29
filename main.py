@@ -2990,6 +2990,49 @@ class CheckoutRequest(BaseModel):
     shipping_address: Optional[dict] = None
 
 
+@app.get("/debug/test-checkout/{order_id}")
+def debug_test_checkout(order_id: str):
+    """
+    Debug endpoint to test full checkout flow without webhook.
+    Generates token and returns checkout URL + shipping data.
+    """
+    try:
+        from checkout import generate_checkout_token, fetch_b2bwave_order, calculate_order_shipping
+        
+        # Fetch order from B2BWave
+        order_data = fetch_b2bwave_order(order_id)
+        if not order_data:
+            return {"status": "error", "error": "Order not found in B2BWave"}
+        
+        # Generate token
+        token = generate_checkout_token(order_id)
+        
+        # Get shipping address
+        shipping_address = order_data.get('shipping_address') or order_data.get('delivery_address') or {}
+        
+        # Calculate shipping
+        shipping_result = calculate_order_shipping(order_data, shipping_address)
+        
+        # Build checkout URL
+        checkout_base = os.environ.get("CHECKOUT_BASE_URL", "https://cfcorderbackend-sandbox.onrender.com")
+        checkout_url = f"{checkout_base}/checkout-ui/{order_id}?token={token}"
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "customer": order_data.get('customer_name'),
+            "customer_email": order_data.get('customer_email'),
+            "token": token,
+            "checkout_url": checkout_url,
+            "api_url": f"{checkout_base}/checkout/{order_id}?token={token}",
+            "destination": shipping_address,
+            "shipping": shipping_result
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+
 @app.post("/webhook/b2bwave-order")
 def b2bwave_order_webhook(payload: dict):
     """
