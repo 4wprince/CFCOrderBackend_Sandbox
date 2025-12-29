@@ -34,7 +34,8 @@ WAREHOUSES = {
     'ROC': {'name': 'ROC Cabinetry', 'city': 'Norcross', 'state': 'GA', 'zip': '30071'},
     'GHI': {'name': 'GHI Cabinets', 'city': 'Palmetto', 'state': 'FL', 'zip': '34221'},
     'Go Bravura': {'name': 'Go Bravura', 'city': 'Houston', 'state': 'TX', 'zip': '77066'},
-    'ARTISAN': {'name': 'Artisan', 'city': 'Houston', 'state': 'TX', 'zip': '77066'},
+    'Love': {'name': 'Love-Milestone', 'city': 'Orlando', 'state': 'FL', 'zip': '32824'},
+    'ARTISAN': {'name': 'Artisan (fallback)', 'city': 'Houston', 'state': 'TX', 'zip': '77066'},
     'Cabinet & Stone': {'name': 'Cabinet & Stone', 'city': 'Houston', 'state': 'TX', 'zip': '77043'},
     'Cabinet & Stone CA': {'name': 'Cabinet & Stone CA', 'city': 'Paramount', 'state': 'CA', 'zip': '90723'},
     'DuraStone': {'name': 'DuraStone', 'city': 'Houston', 'state': 'TX', 'zip': '77037'},
@@ -56,9 +57,9 @@ SKU_WAREHOUSE_MAP = {
     'HGW': 'Go Bravura', 'EMW': 'Go Bravura', 'EGG': 'Go Bravura', 'URC': 'Go Bravura',
     'WWW': 'Go Bravura', 'NDG': 'Go Bravura', 'NCC': 'Go Bravura', 'NBW': 'Go Bravura',
     'BX': 'Go Bravura', 'URW': 'Go Bravura',
-    # ARTISAN
-    'HSS': 'ARTISAN', 'LGS': 'ARTISAN', 'LGSS': 'ARTISAN', 'DG': 'ARTISAN', 
-    'EOK': 'ARTISAN', 'EWT': 'ARTISAN',
+    # Love-Milestone (preferred for these door styles, ARTISAN is fallback)
+    'HSS': 'Love', 'LGS': 'Love', 'LGSS': 'Love', 'DG': 'Love', 
+    'EOK': 'Love', 'EWT': 'Love',
     # Cabinet & Stone (TX default, CA for MSCS)
     'BSN': 'Cabinet & Stone', 'SGCS': 'Cabinet & Stone', 'WOCS': 'Cabinet & Stone',
     'EWSCS': 'Cabinet & Stone', 'CAWN': 'Cabinet & Stone', 'ESCS': 'Cabinet & Stone', 'CS-': 'Cabinet & Stone',
