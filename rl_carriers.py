@@ -650,18 +650,22 @@ def setup_shipment_notification(
     Args:
         pro_number: R+L PRO number
         email_addresses: List of email addresses to notify
-        events: List of events to notify on. Options:
-                - "Delivered"
-                - "OutForDelivery" 
-                - "Exception"
+        events: List of events to notify on. Valid options:
                 - "PickedUp"
-                Default: all events
+                - "Departed"
+                - "ArrivedAt"
+                - "OutForDelivery"
+                - "Delivered"
+                - "BillChange"
+                - "BOLAvailable"
+                - "DRAvail"
+                Default: ["PickedUp", "OutForDelivery", "Delivered"]
     
     Returns:
         Dict with status
     """
     if not events:
-        events = ["Delivered", "OutForDelivery", "Exception", "PickedUp"]
+        events = ["PickedUp", "OutForDelivery", "Delivered"]
     
     payload = {
         "ProNumber": pro_number,
