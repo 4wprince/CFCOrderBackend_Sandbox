@@ -139,52 +139,32 @@ def calculate_shipment_weight(items: list, order_total_weight: float = 0) -> flo
 
 def get_shipping_quote(origin_zip: str, dest_zip: str, weight: float, is_residential: bool, is_oversized: bool = False) -> Dict:
     """Get LTL shipping quote from R+L Carriers direct API"""
+    # Try direct R+L Carriers API first
     try:
-        # Try direct R+L Carriers API first
-        try:
-            from rl_carriers import get_simple_quote, is_configured
-            if is_configured():
-                result = get_simple_quote(
-                    origin_zip=origin_zip,
-                    dest_zip=dest_zip,
-                    weight_lbs=int(weight),
-                    freight_class="70"
-                )
-                return {
-                    'success': True,
-                    'quote': {
-                        'quote_number': result.get('quote_number'),
-                        'customer_price': result.get('net_charge'),
-                        'service_days': result.get('service_days'),
-                        'carrier': result.get('carrier', 'R+L Carriers'),
-                        'service': result.get('service', 'Standard LTL')
-                    }
+        from rl_carriers import get_simple_quote, is_configured
+        if is_configured():
+            result = get_simple_quote(
+                origin_zip=origin_zip,
+                dest_zip=dest_zip,
+                weight_lbs=int(weight),
+                freight_class="70"
+            )
+            return {
+                'success': True,
+                'quote': {
+                    'quote_number': result.get('quote_number'),
+                    'customer_price': result.get('net_charge'),
+                    'service_days': result.get('service_days'),
+                    'carrier': result.get('carrier', 'R+L Carriers'),
+                    'service': result.get('service', 'Standard LTL')
                 }
-        except ImportError:
-            pass  # Fall through to legacy API
-        
-        # Fallback to legacy rl-quote-sandbox (if still needed)
-        url = f"{RL_QUOTE_API_URL}/quote/simple"
-        params = {
-            'origin_zip': origin_zip,
-            'destination_zip': dest_zip,
-            'weight_lbs': int(weight),
-            'is_residential': 'true' if is_residential else 'false',
-            'is_oversized': 'true' if is_oversized else 'false'
-        }
-        
-        query_string = '&'.join(f"{k}={v}" for k, v in params.items())
-        full_url = f"{url}?{query_string}"
-        
-        req = urllib.request.Request(full_url, method='POST')
-        req.add_header('Content-Type', 'application/json')
-        
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode())
-            return data
-            
+            }
+        else:
+            return {'success': False, 'error': 'R+L Carriers API not configured'}
+    except ImportError as e:
+        return {'success': False, 'error': f'rl_carriers module not available: {e}'}
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': f'R+L API error: {str(e)}'}
 
 
 # =============================================================================
