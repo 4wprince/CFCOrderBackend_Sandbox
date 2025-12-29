@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.18")
+app = FastAPI(title="CFC Order Workflow", version="5.9.19")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.18",
+        "version": "5.9.19",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.18"}
+    return {"status": "ok", "version": "5.9.19"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -1005,6 +1005,106 @@ def rl_create_order_bol(
                 "pieces": pieces,
                 "description": description
             }
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/rl/order/{order_id}/pickup")
+def rl_create_order_pickup(
+    order_id: str,
+    warehouse_code: str,
+    pickup_date: Optional[str] = None,
+    ready_time: str = "09:00",
+    close_time: str = "17:00",
+    additional_instructions: Optional[str] = ""
+):
+    """
+    Create pickup request for a warehouse shipment.
+    Uses warehouse addresses from checkout.py and customer info from B2BWave.
+    
+    Args:
+        order_id: B2BWave order ID
+        warehouse_code: Warehouse code (e.g., 'L&C', 'Cabinet & Stone')
+        pickup_date: Pickup date in MM/dd/yyyy format (optional, defaults to tomorrow)
+        ready_time: Ready time (default 09:00)
+        close_time: Close time (default 17:00)
+    """
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from checkout import WAREHOUSES, fetch_b2bwave_order, calculate_order_shipping
+        from rl_carriers import create_pickup_request
+        
+        # Get warehouse info
+        warehouse = WAREHOUSES.get(warehouse_code)
+        if not warehouse:
+            return {"status": "error", "message": f"Unknown warehouse: {warehouse_code}"}
+        
+        # Fetch order from B2BWave
+        order_data = fetch_b2bwave_order(order_id)
+        if not order_data:
+            return {"status": "error", "message": f"Order {order_id} not found"}
+        
+        # Get shipping address
+        shipping = order_data.get('shipping_address', {})
+        
+        # Calculate shipping to get weight
+        dest_address = {
+            'address': shipping.get('address', ''),
+            'city': shipping.get('city', ''),
+            'state': shipping.get('state', ''),
+            'zip': shipping.get('zip', ''),
+            'country': shipping.get('country', 'US')
+        }
+        
+        shipping_calc = calculate_order_shipping(order_data, dest_address)
+        
+        # Find the shipment for this warehouse
+        warehouse_shipment = None
+        for shipment in shipping_calc.get('shipments', []):
+            if shipment.get('warehouse') == warehouse_code:
+                warehouse_shipment = shipment
+                break
+        
+        if not warehouse_shipment:
+            return {"status": "error", "message": f"No shipment found for warehouse {warehouse_code}"}
+        
+        weight = warehouse_shipment.get('weight', 100)
+        items = warehouse_shipment.get('items', [])
+        pieces = len(items) if items else 1
+        
+        # Create pickup request
+        result = create_pickup_request(
+            shipper_name=warehouse.get('name'),
+            shipper_address=warehouse.get('address', ''),
+            shipper_city=warehouse.get('city'),
+            shipper_state=warehouse.get('state'),
+            shipper_zip=warehouse.get('zip'),
+            shipper_phone=warehouse.get('phone', ''),
+            dest_city=shipping.get('city', ''),
+            dest_state=shipping.get('state', ''),
+            dest_zip=shipping.get('zip', ''),
+            weight_lbs=int(weight),
+            pieces=pieces,
+            pickup_date=pickup_date,
+            ready_time=ready_time,
+            close_time=close_time,
+            contact_name=warehouse.get('name'),
+            contact_email=order_data.get('customer_email', ''),
+            additional_instructions=additional_instructions or f"Order #{order_id}"
+        )
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "warehouse": warehouse_code,
+            "pickup": result
         }
         
     except Exception as e:
