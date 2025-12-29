@@ -2936,6 +2936,55 @@ def debug_b2bwave_raw(order_id: str):
         return {"status": "error", "error": str(e)}
 
 
+@app.get("/debug/warehouse-routing/{order_id}")
+def debug_warehouse_routing(order_id: str):
+    """Debug endpoint to test warehouse routing for an order - no token required"""
+    try:
+        from checkout import group_items_by_warehouse, get_warehouse_for_sku, WAREHOUSES
+        
+        # Fetch order from B2BWave
+        order_data = fetch_b2bwave_order(order_id)
+        if not order_data:
+            return {"status": "error", "error": "Order not found in B2BWave"}
+        
+        line_items = order_data.get('line_items', [])
+        
+        # Show warehouse routing for each item
+        item_routing = []
+        for item in line_items:
+            sku = item.get('sku', '')
+            warehouse = get_warehouse_for_sku(sku)
+            item_routing.append({
+                "sku": sku,
+                "name": item.get('product_name', ''),
+                "qty": item.get('quantity', 0),
+                "warehouse": warehouse,
+                "warehouse_info": WAREHOUSES.get(warehouse, {}) if warehouse else None
+            })
+        
+        # Group by warehouse
+        warehouse_groups = group_items_by_warehouse(line_items)
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "customer": order_data.get('customer_name', ''),
+            "total_items": len(line_items),
+            "item_routing": item_routing,
+            "warehouse_groups": {
+                wh: {
+                    "warehouse_info": WAREHOUSES.get(wh, {}),
+                    "item_count": len(items),
+                    "items": [{"sku": i.get('sku'), "name": i.get('product_name'), "qty": i.get('quantity')} for i in items]
+                }
+                for wh, items in warehouse_groups.items()
+            }
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
+
+
 class CheckoutRequest(BaseModel):
     order_id: str
     shipping_address: Optional[dict] = None
