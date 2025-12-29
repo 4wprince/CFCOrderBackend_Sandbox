@@ -457,6 +457,60 @@ def print_shipping_labels(pro_number: str, num_labels: int = 4, style: int = 1) 
 # PICKUP REQUESTS
 # =============================================================================
 
+def create_pickup_for_pro(
+    pro_number: str,
+    pickup_date: str = None,
+    ready_time: str = "09:00",
+    close_time: str = "17:00",
+    contact_name: str = "",
+    contact_phone: str = "",
+    contact_email: str = "",
+    additional_instructions: str = "",
+    send_email_confirmation: bool = True
+) -> Dict:
+    """
+    Schedule pickup for an existing BOL/PRO number.
+    This is the simpler method when you already have a PRO.
+    
+    Args:
+        pro_number: R+L PRO number from BOL
+        pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
+        ready_time: Ready time in HH:MM format (24-hour)
+        close_time: Close time in HH:MM format (24-hour)
+    
+    Returns:
+        Dict with pickup request ID
+    """
+    if not pickup_date:
+        pickup_date = (datetime.now() + timedelta(days=1)).strftime("%m/%d/%Y")
+    
+    payload = {
+        "ProNumber": pro_number,
+        "PickupInformation": {
+            "PickupDate": pickup_date,
+            "ReadyTime": ready_time,
+            "CloseTime": close_time,
+            "AdditionalInstructions": additional_instructions
+        },
+        "SendEmailConfirmation": send_email_confirmation
+    }
+    
+    # Add contact if provided
+    if contact_name or contact_phone or contact_email:
+        payload["Contact"] = {
+            "Name": contact_name,
+            "PhoneNumber": contact_phone,
+            "EmailAddress": contact_email
+        }
+    
+    result = _make_request("PickupRequest", method="POST", data=payload)
+    
+    return {
+        "pickup_request_id": result.get("PickupRequestId"),
+        "messages": result.get("Messages", [])
+    }
+
+
 def create_pickup_request(
     # Shipper info
     shipper_name: str,
@@ -521,8 +575,8 @@ def create_pickup_request(
                 }
             ],
             "PickupDate": pickup_date,
-            "ReadyTime": ready_time if "AM" in ready_time or "PM" in ready_time else f"{ready_time} AM" if int(ready_time.split(':')[0]) < 12 else f"{ready_time} PM",
-            "CloseTime": close_time if "AM" in close_time or "PM" in close_time else f"{close_time} PM",
+            "ReadyTime": ready_time,
+            "CloseTime": close_time,
             "AdditionalInstructions": additional_instructions
         },
         "SendEmailConfirmation": send_email_confirmation

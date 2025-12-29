@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.20")
+app = FastAPI(title="CFC Order Workflow", version="5.9.21")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.20",
+        "version": "5.9.21",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.20"}
+    return {"status": "ok", "version": "5.9.21"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -811,6 +811,46 @@ def rl_create_pickup(request: RLPickupRequest):
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/rl/pickup/pro/{pro_number}")
+def rl_pickup_for_pro(
+    pro_number: str,
+    pickup_date: Optional[str] = None,
+    ready_time: str = "09:00",
+    close_time: str = "17:00",
+    contact_name: Optional[str] = "",
+    contact_email: Optional[str] = ""
+):
+    """
+    Schedule pickup for an existing BOL by PRO number.
+    Simpler than standalone pickup - just needs the PRO.
+    
+    Args:
+        pro_number: R+L PRO number (from BOL creation)
+        pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
+        ready_time: Ready time HH:MM (default 09:00)
+        close_time: Close time HH:MM (default 17:00)
+    """
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from rl_carriers import create_pickup_for_pro
+        result = create_pickup_for_pro(
+            pro_number=pro_number,
+            pickup_date=pickup_date,
+            ready_time=ready_time,
+            close_time=close_time,
+            contact_name=contact_name,
+            contact_email=contact_email
+        )
+        return {"status": "ok", "pro_number": pro_number, "pickup": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/rl/pickup/{pickup_id}")
 def rl_get_pickup(pickup_id: int):
     """Get pickup request details"""
@@ -835,6 +875,44 @@ def rl_cancel_pickup(pickup_id: int, reason: str = "Order cancelled"):
         from rl_carriers import cancel_pickup_request
         result = cancel_pickup_request(pickup_id, reason)
         return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/rl/pickup/pro/{pro_number}")
+def rl_pickup_for_pro(
+    pro_number: str,
+    pickup_date: Optional[str] = None,
+    ready_time: str = "09:00",
+    close_time: str = "17:00",
+    additional_instructions: Optional[str] = ""
+):
+    """
+    Schedule pickup for an existing BOL/PRO number.
+    Much simpler than creating a full pickup request.
+    
+    Args:
+        pro_number: R+L PRO number (e.g., WZ4947057)
+        pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
+        ready_time: Ready time in HH:MM format (default 09:00)
+        close_time: Close time in HH:MM format (default 17:00)
+    """
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from rl_carriers import create_pickup_for_pro
+        result = create_pickup_for_pro(
+            pro_number=pro_number,
+            pickup_date=pickup_date,
+            ready_time=ready_time,
+            close_time=close_time,
+            additional_instructions=additional_instructions
+        )
+        return {"status": "ok", "pickup": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
