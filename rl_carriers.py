@@ -296,6 +296,326 @@ def track_shipment(pro_number: str) -> Dict:
     return shipments[0]
 
 
+# =============================================================================
+# BILL OF LADING (BOL)
+# =============================================================================
+
+def create_bol(
+    # Shipper info
+    shipper_name: str,
+    shipper_address: str,
+    shipper_city: str,
+    shipper_state: str,
+    shipper_zip: str,
+    shipper_phone: str,
+    # Consignee info
+    consignee_name: str,
+    consignee_address: str,
+    consignee_city: str,
+    consignee_state: str,
+    consignee_zip: str,
+    consignee_phone: str,
+    # Shipment details
+    weight_lbs: int,
+    pieces: int = 1,
+    description: str = "RTA Cabinets",
+    freight_class: str = "70",
+    # Optional
+    shipper_address2: str = "",
+    consignee_address2: str = "",
+    consignee_email: str = "",
+    po_number: str = "",
+    quote_number: str = "",
+    special_instructions: str = "",
+    bol_date: str = None,
+    # Pickup request options
+    include_pickup: bool = False,
+    pickup_date: str = None,
+    pickup_ready_time: str = "09:00",
+    pickup_close_time: str = "17:00"
+) -> Dict:
+    """
+    Create a Bill of Lading with R+L Carriers.
+    
+    Returns:
+        Dict with PRO number and pickup request ID (if requested)
+    """
+    if not bol_date:
+        bol_date = datetime.now().strftime("%m/%d/%Y")
+    
+    payload = {
+        "BillOfLading": {
+            "BOLDate": bol_date,
+            "Shipper": {
+                "CompanyName": shipper_name,
+                "AddressLine1": shipper_address,
+                "AddressLine2": shipper_address2,
+                "City": shipper_city,
+                "StateOrProvince": shipper_state,
+                "ZipOrPostalCode": shipper_zip,
+                "CountryCode": "USA",
+                "PhoneNumber": shipper_phone
+            },
+            "Consignee": {
+                "CompanyName": consignee_name,
+                "AddressLine1": consignee_address,
+                "AddressLine2": consignee_address2,
+                "City": consignee_city,
+                "StateOrProvince": consignee_state,
+                "ZipOrPostalCode": consignee_zip,
+                "CountryCode": "USA",
+                "PhoneNumber": consignee_phone,
+                "EmailAddress": consignee_email
+            },
+            "Items": [
+                {
+                    "Pieces": pieces,
+                    "PackageType": "PLT",  # Pallet
+                    "Description": description,
+                    "Class": freight_class,
+                    "Weight": int(weight_lbs)
+                }
+            ],
+            "FreightChargePaymentMethod": "Prepaid",
+            "ServiceLevel": "Standard"
+        }
+    }
+    
+    # Add reference numbers if provided
+    ref_numbers = {}
+    if po_number:
+        ref_numbers["PONumber"] = po_number
+    if quote_number:
+        ref_numbers["RateQuoteNumber"] = quote_number
+    if ref_numbers:
+        payload["BillOfLading"]["ReferenceNumbers"] = ref_numbers
+    
+    # Add special instructions
+    if special_instructions:
+        payload["BillOfLading"]["SpecialInstructions"] = special_instructions
+    
+    # Add pickup request if requested
+    if include_pickup:
+        if not pickup_date:
+            pickup_date = (datetime.now() + timedelta(days=1)).strftime("%m/%d/%Y")
+        
+        payload["PickupRequest"] = {
+            "PickupInformation": {
+                "PickupDate": pickup_date,
+                "ReadyTime": pickup_ready_time,
+                "CloseTime": pickup_close_time
+            },
+            "SendEmailConfirmation": True
+        }
+    
+    result = _make_request("BillOfLading", method="POST", data=payload)
+    
+    return {
+        "pro_number": result.get("ProNumber"),
+        "pickup_request_id": result.get("PickupRequestNumber"),
+        "messages": result.get("Messages", [])
+    }
+
+
+def get_bol(pro_number: str) -> Dict:
+    """Get BOL details by PRO number"""
+    result = _make_request(f"BillOfLading?request.proNumber={pro_number}", method="GET")
+    return result.get("BillOfLading", {})
+
+
+def print_bol_pdf(pro_number: str) -> str:
+    """
+    Get BOL as PDF (base64 encoded).
+    
+    Returns:
+        Base64 encoded PDF document
+    """
+    result = _make_request(f"BillOfLading/PrintBOL?request.proNumber={pro_number}", method="GET")
+    return result.get("BolDocument", "")
+
+
+def print_shipping_labels(pro_number: str, num_labels: int = 4, style: int = 1) -> str:
+    """
+    Get shipping labels as PDF (base64 encoded).
+    
+    Args:
+        pro_number: R+L PRO number
+        num_labels: Number of labels (1-100)
+        style: Label style (1-13)
+    
+    Returns:
+        Base64 encoded PDF document
+    """
+    result = _make_request(
+        f"BillOfLading/PrintShippingLabels?request.proNumber={pro_number}&request.style={style}&request.numberOfLabels={num_labels}",
+        method="GET"
+    )
+    return result.get("ShippingLabelsFile", "")
+
+
+# =============================================================================
+# PICKUP REQUESTS
+# =============================================================================
+
+def create_pickup_request(
+    # Shipper info
+    shipper_name: str,
+    shipper_address: str,
+    shipper_city: str,
+    shipper_state: str,
+    shipper_zip: str,
+    shipper_phone: str,
+    # Destination info
+    dest_city: str,
+    dest_state: str,
+    dest_zip: str,
+    # Shipment details
+    weight_lbs: int,
+    pieces: int = 1,
+    # Pickup schedule
+    pickup_date: str = None,
+    ready_time: str = "09:00",
+    close_time: str = "17:00",
+    # Optional
+    shipper_address2: str = "",
+    contact_name: str = "",
+    contact_email: str = "",
+    additional_instructions: str = "",
+    send_email_confirmation: bool = True
+) -> Dict:
+    """
+    Create a pickup request with R+L Carriers.
+    
+    Returns:
+        Dict with pickup request ID
+    """
+    if not pickup_date:
+        pickup_date = (datetime.now() + timedelta(days=1)).strftime("%m/%d/%Y")
+    
+    payload = {
+        "Pickup": {
+            "Shipper": {
+                "CompanyName": shipper_name,
+                "AddressLine1": shipper_address,
+                "AddressLine2": shipper_address2,
+                "City": shipper_city,
+                "StateOrProvince": shipper_state,
+                "ZipOrPostalCode": shipper_zip,
+                "CountryCode": "USA",
+                "PhoneNumber": shipper_phone
+            },
+            "Contact": {
+                "Name": contact_name or shipper_name,
+                "PhoneNumber": shipper_phone,
+                "EmailAddress": contact_email
+            },
+            "Destinations": [
+                {
+                    "City": dest_city,
+                    "StateOrProvince": dest_state,
+                    "ZipOrPostalCode": dest_zip,
+                    "CountryCode": "USA",
+                    "Weight": int(weight_lbs),
+                    "Pieces": pieces,
+                    "PackageType": "PLT"
+                }
+            ],
+            "PickupDate": pickup_date,
+            "ReadyTime": ready_time,
+            "CloseTime": close_time,
+            "AdditionalInstructions": additional_instructions
+        },
+        "SendEmailConfirmation": send_email_confirmation
+    }
+    
+    result = _make_request("PickupRequest", method="POST", data=payload)
+    
+    return {
+        "pickup_request_id": result.get("PickupRequestId"),
+        "messages": result.get("Messages", [])
+    }
+
+
+def get_pickup_request(pickup_request_id: int) -> Dict:
+    """Get pickup request details by ID"""
+    result = _make_request(f"PickupRequest?request.pickupRequestId={pickup_request_id}", method="GET")
+    return {
+        "pickup": result.get("Pickup", {}),
+        "pickup_request_id": result.get("PickupRequestId")
+    }
+
+
+def cancel_pickup_request(pickup_request_id: int, reason: str = "Order cancelled") -> Dict:
+    """Cancel a pickup request"""
+    payload = {
+        "PickupRequestId": pickup_request_id,
+        "Reason": reason
+    }
+    result = _make_request("PickupRequest", method="DELETE", data=payload)
+    return {
+        "status": "cancelled",
+        "messages": result.get("Messages", [])
+    }
+
+
+# =============================================================================
+# NOTIFICATIONS
+# =============================================================================
+
+def setup_shipment_notification(
+    pro_number: str,
+    email_addresses: List[str],
+    events: List[str] = None
+) -> Dict:
+    """
+    Set up email notifications for a specific shipment.
+    
+    Args:
+        pro_number: R+L PRO number
+        email_addresses: List of email addresses to notify
+        events: List of events to notify on. Options:
+                - "Delivered"
+                - "OutForDelivery" 
+                - "Exception"
+                - "PickedUp"
+                Default: all events
+    
+    Returns:
+        Dict with status
+    """
+    if not events:
+        events = ["Delivered", "OutForDelivery", "Exception", "PickedUp"]
+    
+    payload = {
+        "ProNumber": pro_number,
+        "NotificationType": "Shipment",
+        "Events": events,
+        "Emails": email_addresses
+    }
+    
+    result = _make_request("ProNotification", method="PUT", data=payload)
+    return {
+        "status": "ok",
+        "messages": result.get("Messages", [])
+    }
+
+
+def get_shipment_notification(pro_number: str) -> Dict:
+    """Get notification settings for a shipment"""
+    result = _make_request(
+        f"ProNotification?request.notificationType=Shipment&request.proNumber={pro_number}",
+        method="GET"
+    )
+    return {
+        "events": result.get("Events", []),
+        "emails": result.get("Emails", [])
+    }
+
+
+# =============================================================================
+# UTILITIES
+# =============================================================================
+
 def test_connection() -> Dict:
     """Test API connection by fetching pallet types"""
     try:

@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.11")
+app = FastAPI(title="CFC Order Workflow", version="5.9.12")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.11",
+        "version": "5.9.12",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.11"}
+    return {"status": "ok", "version": "5.9.12"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -623,6 +623,259 @@ def rl_track(pro_number: str):
             "status": "error",
             "message": str(e)
         }
+
+
+# --- R+L BOL and Pickup Endpoints ---
+
+class RLBolRequest(BaseModel):
+    """Request model for creating BOL"""
+    # Shipper
+    shipper_name: str
+    shipper_address: str
+    shipper_city: str
+    shipper_state: str
+    shipper_zip: str
+    shipper_phone: str
+    shipper_address2: Optional[str] = ""
+    # Consignee
+    consignee_name: str
+    consignee_address: str
+    consignee_city: str
+    consignee_state: str
+    consignee_zip: str
+    consignee_phone: str
+    consignee_address2: Optional[str] = ""
+    consignee_email: Optional[str] = ""
+    # Shipment
+    weight_lbs: int
+    pieces: int = 1
+    description: str = "RTA Cabinets"
+    freight_class: str = "70"
+    # Reference
+    po_number: Optional[str] = ""
+    quote_number: Optional[str] = ""
+    special_instructions: Optional[str] = ""
+    # Pickup
+    include_pickup: bool = False
+    pickup_date: Optional[str] = None
+    pickup_ready_time: str = "09:00"
+    pickup_close_time: str = "17:00"
+
+
+@app.post("/rl/bol")
+def rl_create_bol(request: RLBolRequest):
+    """Create Bill of Lading with R+L Carriers"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from rl_carriers import create_bol
+        result = create_bol(
+            shipper_name=request.shipper_name,
+            shipper_address=request.shipper_address,
+            shipper_address2=request.shipper_address2,
+            shipper_city=request.shipper_city,
+            shipper_state=request.shipper_state,
+            shipper_zip=request.shipper_zip,
+            shipper_phone=request.shipper_phone,
+            consignee_name=request.consignee_name,
+            consignee_address=request.consignee_address,
+            consignee_address2=request.consignee_address2,
+            consignee_city=request.consignee_city,
+            consignee_state=request.consignee_state,
+            consignee_zip=request.consignee_zip,
+            consignee_phone=request.consignee_phone,
+            consignee_email=request.consignee_email,
+            weight_lbs=request.weight_lbs,
+            pieces=request.pieces,
+            description=request.description,
+            freight_class=request.freight_class,
+            po_number=request.po_number,
+            quote_number=request.quote_number,
+            special_instructions=request.special_instructions,
+            include_pickup=request.include_pickup,
+            pickup_date=request.pickup_date,
+            pickup_ready_time=request.pickup_ready_time,
+            pickup_close_time=request.pickup_close_time
+        )
+        return {"status": "ok", "bol": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/bol/{pro_number}")
+def rl_get_bol(pro_number: str):
+    """Get BOL details by PRO number"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import get_bol
+        result = get_bol(pro_number)
+        return {"status": "ok", "bol": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/bol/{pro_number}/pdf")
+def rl_get_bol_pdf(pro_number: str):
+    """Get BOL as PDF (base64 encoded)"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import print_bol_pdf
+        pdf_base64 = print_bol_pdf(pro_number)
+        return {"status": "ok", "pdf_base64": pdf_base64}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/bol/{pro_number}/labels")
+def rl_get_labels(pro_number: str, num_labels: int = 4):
+    """Get shipping labels as PDF (base64 encoded)"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import print_shipping_labels
+        pdf_base64 = print_shipping_labels(pro_number, num_labels)
+        return {"status": "ok", "pdf_base64": pdf_base64}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+class RLPickupRequest(BaseModel):
+    """Request model for creating pickup"""
+    # Shipper
+    shipper_name: str
+    shipper_address: str
+    shipper_city: str
+    shipper_state: str
+    shipper_zip: str
+    shipper_phone: str
+    shipper_address2: Optional[str] = ""
+    # Destination
+    dest_city: str
+    dest_state: str
+    dest_zip: str
+    # Shipment
+    weight_lbs: int
+    pieces: int = 1
+    # Schedule
+    pickup_date: Optional[str] = None
+    ready_time: str = "09:00"
+    close_time: str = "17:00"
+    # Contact
+    contact_name: Optional[str] = ""
+    contact_email: Optional[str] = ""
+    additional_instructions: Optional[str] = ""
+
+
+@app.post("/rl/pickup")
+def rl_create_pickup(request: RLPickupRequest):
+    """Create pickup request with R+L Carriers"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from rl_carriers import create_pickup_request
+        result = create_pickup_request(
+            shipper_name=request.shipper_name,
+            shipper_address=request.shipper_address,
+            shipper_address2=request.shipper_address2,
+            shipper_city=request.shipper_city,
+            shipper_state=request.shipper_state,
+            shipper_zip=request.shipper_zip,
+            shipper_phone=request.shipper_phone,
+            dest_city=request.dest_city,
+            dest_state=request.dest_state,
+            dest_zip=request.dest_zip,
+            weight_lbs=request.weight_lbs,
+            pieces=request.pieces,
+            pickup_date=request.pickup_date,
+            ready_time=request.ready_time,
+            close_time=request.close_time,
+            contact_name=request.contact_name,
+            contact_email=request.contact_email,
+            additional_instructions=request.additional_instructions
+        )
+        return {"status": "ok", "pickup": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/pickup/{pickup_id}")
+def rl_get_pickup(pickup_id: int):
+    """Get pickup request details"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import get_pickup_request
+        result = get_pickup_request(pickup_id)
+        return {"status": "ok", "pickup": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/rl/pickup/{pickup_id}")
+def rl_cancel_pickup(pickup_id: int, reason: str = "Order cancelled"):
+    """Cancel a pickup request"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import cancel_pickup_request
+        result = cancel_pickup_request(pickup_id, reason)
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+class RLNotificationRequest(BaseModel):
+    """Request model for setting up notifications"""
+    pro_number: str
+    email_addresses: List[str]
+    events: Optional[List[str]] = None  # Default: all events
+
+
+@app.post("/rl/notify")
+def rl_setup_notification(request: RLNotificationRequest):
+    """Set up shipment notifications"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import setup_shipment_notification
+        result = setup_shipment_notification(
+            pro_number=request.pro_number,
+            email_addresses=request.email_addresses,
+            events=request.events
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/notify/{pro_number}")
+def rl_get_notification(pro_number: str):
+    """Get notification settings for a shipment"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import get_shipment_notification
+        result = get_shipment_notification(pro_number)
+        return {"status": "ok", "notifications": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # =============================================================================
