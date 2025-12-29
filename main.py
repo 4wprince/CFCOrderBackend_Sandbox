@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.17")
+app = FastAPI(title="CFC Order Workflow", version="5.9.18")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.17",
+        "version": "5.9.18",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.17"}
+    return {"status": "ok", "version": "5.9.18"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -976,11 +976,11 @@ def rl_create_order_bol(
             # Consignee (customer)
             consignee_name=company_name,
             consignee_address=shipping.get('address', ''),
-            consignee_address2='',
+            consignee_address2=shipping.get('address2', ''),
             consignee_city=shipping.get('city', ''),
             consignee_state=shipping.get('state', ''),
             consignee_zip=shipping.get('zip', ''),
-            consignee_phone='',
+            consignee_phone=order_data.get('customer_phone', ''),
             consignee_email=order_data.get('customer_email', ''),
             # Shipment details
             weight_lbs=int(weight),
@@ -1075,11 +1075,11 @@ def rl_get_order_shipments(order_id: str):
                 "email": order_data.get('customer_email', ''),
                 "company": order_data.get('company_name', ''),
                 "address": shipping.get('address', ''),
-                "address2": '',
+                "address2": shipping.get('address2', ''),
                 "city": shipping.get('city', ''),
                 "state": shipping.get('state', ''),
                 "zip": shipping.get('zip', ''),
-                "phone": ''  # Not in fetch_b2bwave_order return
+                "phone": order_data.get('customer_phone', '')
             },
             "shipments": shipments,
             "total_shipping": shipping_calc.get('total_shipping', 0),

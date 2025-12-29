@@ -524,12 +524,14 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
                     'id': raw_order.get('id'),
                     'customer_name': raw_order.get('customer_name'),
                     'customer_email': raw_order.get('customer_email'),
+                    'customer_phone': raw_order.get('customer_phone', ''),
                     'company_name': raw_order.get('customer_company'),
                     'line_items': line_items,
                     'subtotal': float(raw_order.get('gross_total', 0)),
                     'total_weight': total_weight,  # B2BWave's actual weight
                     'shipping_address': {
                         'address': raw_order.get('address', ''),
+                        'address2': raw_order.get('address2', ''),
                         'city': raw_order.get('city', ''),
                         'state': raw_order.get('province', ''),
                         'zip': raw_order.get('postal_code', ''),
