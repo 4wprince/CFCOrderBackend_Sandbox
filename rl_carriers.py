@@ -460,8 +460,8 @@ def print_shipping_labels(pro_number: str, num_labels: int = 4, style: int = 1) 
 def create_pickup_for_pro(
     pro_number: str,
     pickup_date: str = None,
-    ready_time: str = "9:00 AM",
-    close_time: str = "5:00 PM",
+    ready_time: str = "09:00 AM",
+    close_time: str = "05:00 PM",
     contact_name: str = "",
     contact_phone: str = "",
     contact_email: str = "",
@@ -475,8 +475,8 @@ def create_pickup_for_pro(
     Args:
         pro_number: R+L PRO number from BOL
         pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
-        ready_time: Ready time in H:MM AM/PM format (e.g., "9:00 AM")
-        close_time: Close time in H:MM AM/PM format (e.g., "5:00 PM")
+        ready_time: Ready time in HH:MM AM/PM format (e.g., "09:00 AM")
+        close_time: Close time in HH:MM AM/PM format (e.g., "05:00 PM")
     
     Returns:
         Dict with pickup request ID
@@ -600,8 +600,17 @@ def get_pickup_request(pickup_request_id: int) -> Dict:
     }
 
 
+def get_pickup_by_pro(pro_number: str) -> Dict:
+    """Get pickup request details by PRO number"""
+    result = _make_request(f"PickupRequest?request.proNumber={pro_number}", method="GET")
+    return {
+        "pickup": result.get("Pickup", {}),
+        "pickup_request_id": result.get("PickupRequestId")
+    }
+
+
 def cancel_pickup_request(pickup_request_id: int, reason: str = "Order cancelled") -> Dict:
-    """Cancel a pickup request"""
+    """Cancel a pickup request by ID"""
     payload = {
         "PickupRequestId": pickup_request_id,
         "Reason": reason
@@ -611,6 +620,19 @@ def cancel_pickup_request(pickup_request_id: int, reason: str = "Order cancelled
         "status": "cancelled",
         "messages": result.get("Messages", [])
     }
+
+
+def cancel_pickup_by_pro(pro_number: str, reason: str = "Order cancelled") -> Dict:
+    """Cancel a pickup request by PRO number (convenience function)"""
+    # First get the pickup request ID
+    pickup_info = get_pickup_by_pro(pro_number)
+    pickup_id = pickup_info.get("pickup_request_id")
+    
+    if not pickup_id:
+        return {"status": "error", "message": f"No pickup found for PRO {pro_number}"}
+    
+    # Then cancel it
+    return cancel_pickup_request(pickup_id, reason)
 
 
 # =============================================================================

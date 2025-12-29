@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.25")
+app = FastAPI(title="CFC Order Workflow", version="5.9.27")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.25",
+        "version": "5.9.27",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.25"}
+    return {"status": "ok", "version": "5.9.27"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -815,8 +815,8 @@ def rl_create_pickup(request: RLPickupRequest):
 def rl_pickup_for_pro(
     pro_number: str,
     pickup_date: Optional[str] = None,
-    ready_time: str = "9:00 AM",
-    close_time: str = "5:00 PM",
+    ready_time: str = "09:00 AM",
+    close_time: str = "05:00 PM",
     contact_name: Optional[str] = "",
     contact_email: Optional[str] = ""
 ):
@@ -827,8 +827,8 @@ def rl_pickup_for_pro(
     Args:
         pro_number: R+L PRO number (from BOL creation)
         pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
-        ready_time: Ready time in H:MM AM/PM format (default 9:00 AM)
-        close_time: Close time in H:MM AM/PM format (default 5:00 PM)
+        ready_time: Ready time in HH:MM AM/PM format (default 09:00 AM)
+        close_time: Close time in HH:MM AM/PM format (default 05:00 PM)
     """
     if not RL_CARRIERS_LOADED:
         raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
@@ -874,6 +874,34 @@ def rl_cancel_pickup(pickup_id: int, reason: str = "Order cancelled"):
     try:
         from rl_carriers import cancel_pickup_request
         result = cancel_pickup_request(pickup_id, reason)
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/pickup/pro/{pro_number}")
+def rl_get_pickup_by_pro(pro_number: str):
+    """Get pickup request details by PRO number"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import get_pickup_by_pro
+        result = get_pickup_by_pro(pro_number)
+        return {"status": "ok", "pickup": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/rl/pickup/pro/{pro_number}")
+def rl_cancel_pickup_by_pro(pro_number: str, reason: str = "Order cancelled"):
+    """Cancel a pickup request by PRO number"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    try:
+        from rl_carriers import cancel_pickup_by_pro
+        result = cancel_pickup_by_pro(pro_number, reason)
         return {"status": "ok", "result": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
