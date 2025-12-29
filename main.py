@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.16")
+app = FastAPI(title="CFC Order Workflow", version="5.9.17")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.16",
+        "version": "5.9.17",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.16"}
+    return {"status": "ok", "version": "5.9.17"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -919,37 +919,20 @@ def rl_create_order_bol(
         if not order_data:
             return {"status": "error", "message": f"Order {order_id} not found"}
         
-        # Get shipping address - B2BWave returns fields at root level
-        # Try shipping_address object first, then fall back to root level fields
+        # Get shipping address from fetch_b2bwave_order format
+        # It returns: {address, city, state, zip, country}
         shipping = order_data.get('shipping_address', {})
-        if not shipping or not shipping.get('city'):
-            # Use root level fields (B2BWave format)
-            shipping = {
-                'first_name': order_data.get('customer_name', '').split()[0] if order_data.get('customer_name') else '',
-                'last_name': ' '.join(order_data.get('customer_name', '').split()[1:]) if order_data.get('customer_name') else '',
-                'company': order_data.get('customer_company', ''),
-                'address1': order_data.get('address', ''),
-                'address2': order_data.get('address2', ''),
-                'city': order_data.get('city', ''),
-                'province_code': order_data.get('province', ''),
-                'postal_code': order_data.get('postal_code', ''),
-                'country_code': order_data.get('country', 'US'),
-                'phone': order_data.get('customer_phone', '')
-            }
         
-        customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip()
-        if not customer_name:
-            customer_name = order_data.get('customer_name', 'Customer')
-        
-        company_name = shipping.get('company') or customer_name
+        customer_name = order_data.get('customer_name', 'Customer')
+        company_name = order_data.get('company_name') or customer_name
         
         # Calculate shipping to get weight for this warehouse
         dest_address = {
-            'address': shipping.get('address1', ''),
+            'address': shipping.get('address', ''),
             'city': shipping.get('city', ''),
-            'state': shipping.get('province_code', ''),
-            'zip': shipping.get('postal_code', ''),
-            'country': shipping.get('country_code', 'US')
+            'state': shipping.get('state', ''),
+            'zip': shipping.get('zip', ''),
+            'country': shipping.get('country', 'US')
         }
         
         shipping_calc = calculate_order_shipping(order_data, dest_address)
@@ -992,12 +975,12 @@ def rl_create_order_bol(
             shipper_phone=warehouse.get('phone', ''),
             # Consignee (customer)
             consignee_name=company_name,
-            consignee_address=shipping.get('address1', ''),
-            consignee_address2=shipping.get('address2', ''),
+            consignee_address=shipping.get('address', ''),
+            consignee_address2='',
             consignee_city=shipping.get('city', ''),
-            consignee_state=shipping.get('province_code', ''),
-            consignee_zip=shipping.get('postal_code', ''),
-            consignee_phone=shipping.get('phone', ''),
+            consignee_state=shipping.get('state', ''),
+            consignee_zip=shipping.get('zip', ''),
+            consignee_phone='',
             consignee_email=order_data.get('customer_email', ''),
             # Shipment details
             weight_lbs=int(weight),
@@ -1042,29 +1025,16 @@ def rl_get_order_shipments(order_id: str):
         if not order_data:
             return {"status": "error", "message": f"Order {order_id} not found"}
         
-        # Get shipping address - B2BWave returns fields at root level
+        # Get shipping address from fetch_b2bwave_order format
+        # It returns: {address, city, state, zip, country}
         shipping = order_data.get('shipping_address', {})
-        if not shipping or not shipping.get('city'):
-            # Use root level fields (B2BWave format)
-            shipping = {
-                'first_name': order_data.get('customer_name', '').split()[0] if order_data.get('customer_name') else '',
-                'last_name': ' '.join(order_data.get('customer_name', '').split()[1:]) if order_data.get('customer_name') else '',
-                'company': order_data.get('customer_company', ''),
-                'address1': order_data.get('address', ''),
-                'address2': order_data.get('address2', ''),
-                'city': order_data.get('city', ''),
-                'province_code': order_data.get('province', ''),
-                'postal_code': order_data.get('postal_code', ''),
-                'country_code': order_data.get('country', 'US'),
-                'phone': order_data.get('customer_phone', '')
-            }
         
         dest_address = {
-            'address': shipping.get('address1', ''),
+            'address': shipping.get('address', ''),
             'city': shipping.get('city', ''),
-            'state': shipping.get('province_code', ''),
-            'zip': shipping.get('postal_code', ''),
-            'country': shipping.get('country_code', 'US')
+            'state': shipping.get('state', ''),
+            'zip': shipping.get('zip', ''),
+            'country': shipping.get('country', 'US')
         }
         
         # Calculate shipping
@@ -1094,22 +1064,22 @@ def rl_get_order_shipments(order_id: str):
                 "needs_bol": s.get('shipping_method') == 'ltl'
             })
         
-        # Customer info
-        customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip()
+        # Customer info - parse name from customer_name field
+        customer_name = order_data.get('customer_name', '')
         
         return {
             "status": "ok",
             "order_id": order_id,
             "customer": {
-                "name": customer_name or order_data.get('customer_name', ''),
+                "name": customer_name,
                 "email": order_data.get('customer_email', ''),
-                "company": shipping.get('company', ''),
-                "address": shipping.get('address1', ''),
-                "address2": shipping.get('address2', ''),
+                "company": order_data.get('company_name', ''),
+                "address": shipping.get('address', ''),
+                "address2": '',
                 "city": shipping.get('city', ''),
-                "state": shipping.get('province_code', ''),
-                "zip": shipping.get('postal_code', ''),
-                "phone": shipping.get('phone', '')
+                "state": shipping.get('state', ''),
+                "zip": shipping.get('zip', ''),
+                "phone": ''  # Not in fetch_b2bwave_order return
             },
             "shipments": shipments,
             "total_shipping": shipping_calc.get('total_shipping', 0),
