@@ -503,7 +503,8 @@ def create_pickup_for_pro(
             "EmailAddress": contact_email
         }
     
-    result = _make_request("PickupRequest", method="POST", data=payload)
+    # Use FromBOL endpoint for PRO-based pickup
+    result = _make_request("PickupRequest/FromBOL", method="POST", data=payload)
     
     return {
         "pickup_request_id": result.get("PickupRequestId"),
