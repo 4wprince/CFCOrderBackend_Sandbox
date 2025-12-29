@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.24")
+app = FastAPI(title="CFC Order Workflow", version="5.9.25")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.24",
+        "version": "5.9.25",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.24"}
+    return {"status": "ok", "version": "5.9.25"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -815,8 +815,8 @@ def rl_create_pickup(request: RLPickupRequest):
 def rl_pickup_for_pro(
     pro_number: str,
     pickup_date: Optional[str] = None,
-    ready_time: str = "09:00",
-    close_time: str = "17:00",
+    ready_time: str = "9:00 AM",
+    close_time: str = "5:00 PM",
     contact_name: Optional[str] = "",
     contact_email: Optional[str] = ""
 ):
@@ -827,8 +827,8 @@ def rl_pickup_for_pro(
     Args:
         pro_number: R+L PRO number (from BOL creation)
         pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
-        ready_time: Ready time HH:MM (default 09:00)
-        close_time: Close time HH:MM (default 17:00)
+        ready_time: Ready time in H:MM AM/PM format (default 9:00 AM)
+        close_time: Close time in H:MM AM/PM format (default 5:00 PM)
     """
     if not RL_CARRIERS_LOADED:
         raise HTTPException(status_code=503, detail="rl_carriers module not loaded")

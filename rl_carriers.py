@@ -460,8 +460,8 @@ def print_shipping_labels(pro_number: str, num_labels: int = 4, style: int = 1) 
 def create_pickup_for_pro(
     pro_number: str,
     pickup_date: str = None,
-    ready_time: str = "09:00",
-    close_time: str = "17:00",
+    ready_time: str = "9:00 AM",
+    close_time: str = "5:00 PM",
     contact_name: str = "",
     contact_phone: str = "",
     contact_email: str = "",
@@ -475,8 +475,8 @@ def create_pickup_for_pro(
     Args:
         pro_number: R+L PRO number from BOL
         pickup_date: Date in MM/dd/yyyy format (optional, defaults to tomorrow)
-        ready_time: Ready time in HH:MM format (24-hour)
-        close_time: Close time in HH:MM format (24-hour)
+        ready_time: Ready time in H:MM AM/PM format (e.g., "9:00 AM")
+        close_time: Close time in H:MM AM/PM format (e.g., "5:00 PM")
     
     Returns:
         Dict with pickup request ID
