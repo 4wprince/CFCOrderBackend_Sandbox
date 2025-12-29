@@ -1573,6 +1573,75 @@ def test_shippo_api():
     return result
 
 
+# =============================================================================
+# RTA DATABASE - SKU Weights and Shipping Rules
+# =============================================================================
+
+# Import RTA database module
+try:
+    from rta_database import (
+        init_rta_table, get_sku_info, get_skus_info,
+        calculate_order_weight_and_flags, get_rta_stats
+    )
+    RTA_DB_ENABLED = True
+except ImportError as e:
+    print(f"[STARTUP] rta_database module not found: {e}")
+    RTA_DB_ENABLED = False
+
+
+@app.get("/rta/status")
+def rta_status():
+    """Check RTA database status and stats"""
+    if not RTA_DB_ENABLED:
+        return {"configured": False, "message": "RTA database module not loaded"}
+    
+    try:
+        stats = get_rta_stats()
+        return {
+            "configured": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {"configured": True, "error": str(e)}
+
+
+@app.post("/rta/init")
+def rta_init_table():
+    """Initialize the RTA products table"""
+    if not RTA_DB_ENABLED:
+        raise HTTPException(status_code=503, detail="RTA database module not loaded")
+    
+    result = init_rta_table()
+    return result
+
+
+@app.get("/rta/sku/{sku}")
+def rta_get_sku(sku: str):
+    """Look up a single SKU"""
+    if not RTA_DB_ENABLED:
+        raise HTTPException(status_code=503, detail="RTA database module not loaded")
+    
+    info = get_sku_info(sku)
+    if not info:
+        raise HTTPException(status_code=404, detail=f"SKU {sku} not found")
+    
+    return info
+
+
+@app.post("/rta/calculate-weight")
+def rta_calculate_weight(line_items: list):
+    """
+    Calculate total weight and check for long pallet items.
+    
+    Body: [{"sku": "NJGR-WF342", "quantity": 1}, ...]
+    """
+    if not RTA_DB_ENABLED:
+        raise HTTPException(status_code=503, detail="RTA database module not loaded")
+    
+    result = calculate_order_weight_and_flags(line_items)
+    return result
+
+
 @app.get("/b2bwave/order/{order_id}")
 def get_b2bwave_order(order_id: str):
     """Fetch a specific order from B2BWave and sync it"""

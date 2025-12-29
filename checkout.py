@@ -108,17 +108,32 @@ def group_items_by_warehouse(line_items: list) -> Dict[str, list]:
     return groups
 
 
-def calculate_shipment_weight(items: list) -> float:
-    """Calculate total weight for items (placeholder - needs real weight data)"""
-    # TODO: Look up actual weights from database
-    # For now, estimate based on quantity
+def calculate_shipment_weight(items: list, order_total_weight: float = 0) -> float:
+    """
+    Calculate total weight for items.
+    
+    Priority:
+    1. Use B2BWave's total_weight if available (for single-warehouse orders)
+    2. Fall back to estimate: 30 lbs per cabinet
+    
+    Args:
+        items: List of line items
+        order_total_weight: B2BWave's total_weight for the order (0 if not available)
+    
+    Returns:
+        Weight in lbs (minimum 1 lb)
+    """
+    # If B2BWave provided a weight, use it
+    if order_total_weight and order_total_weight > 0:
+        return max(order_total_weight, 1)
+    
+    # Fall back to estimate: 30 lbs per cabinet
     total_weight = 0
     for item in items:
         qty = item.get('quantity', 1)
-        # Rough estimate: 30 lbs per cabinet average
         total_weight += qty * 30
     
-    return max(total_weight, 100)  # Minimum 100 lbs
+    return max(total_weight, 1)  # Minimum 1 lb (removed 100 lb minimum)
 
 
 def get_shipping_quote(origin_zip: str, dest_zip: str, weight: float, is_residential: bool, is_oversized: bool = False) -> Dict:
@@ -219,6 +234,11 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
     Calculate shipping for an entire order, grouped by warehouse.
     Uses Shippo for small packages (<70 lbs) and R+L for LTL (70+ lbs).
     
+    Weight Priority:
+    1. RTA database (SKU-level weights) - most accurate for split orders
+    2. B2BWave total_weight - good for single warehouse orders
+    3. Estimate at 30 lbs per item - fallback
+    
     Returns:
         {
             'shipments': [
@@ -232,6 +252,18 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
     """
     line_items = order_data.get('line_items', []) or order_data.get('products', [])
     
+    # Get B2BWave's total weight (if available) as fallback
+    b2bwave_total_weight = order_data.get('total_weight', 0)
+    
+    # Try to get weights from RTA database
+    rta_weight_info = None
+    try:
+        from rta_database import calculate_order_weight_and_flags
+        rta_weight_info = calculate_order_weight_and_flags(line_items)
+        print(f"[CHECKOUT] RTA weight lookup: {rta_weight_info.get('total_weight')} lbs, long_pallet: {rta_weight_info.get('has_long_pallet_item')}")
+    except Exception as e:
+        print(f"[CHECKOUT] RTA database not available: {e}")
+    
     # Group by warehouse
     warehouse_groups = group_items_by_warehouse(line_items)
     
@@ -242,6 +274,12 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
     
     shipments = []
     total_shipping = 0
+    
+    # Build SKU to RTA info lookup
+    sku_to_rta = {}
+    if rta_weight_info and rta_weight_info.get('items'):
+        for item_info in rta_weight_info['items']:
+            sku_to_rta[item_info.get('sku', '')] = item_info
     
     for warehouse_code, items in warehouse_groups.items():
         if warehouse_code == 'UNKNOWN':
@@ -259,9 +297,32 @@ def calculate_order_shipping(order_data: dict, dest_address: dict) -> Dict:
         if not warehouse:
             continue
         
-        # Calculate weight and check oversized
-        weight = calculate_shipment_weight(items)
-        oversized = any(is_oversized(item.get('name', '')) for item in items)
+        # Calculate weight for this warehouse's shipment using RTA data
+        warehouse_weight = 0
+        has_long_pallet = False
+        
+        for item in items:
+            sku = item.get('sku', '')
+            qty = item.get('quantity', 1)
+            
+            rta_info = sku_to_rta.get(sku)
+            if rta_info:
+                warehouse_weight += rta_info.get('line_weight', 0)
+                if rta_info.get('requires_long_pallet'):
+                    has_long_pallet = True
+            else:
+                # Fallback: estimate 30 lbs per item
+                warehouse_weight += 30 * qty
+        
+        # If no RTA data available at all, use B2BWave weight for single warehouse
+        if warehouse_weight == 0 and b2bwave_total_weight > 0 and len(warehouse_groups) == 1:
+            warehouse_weight = b2bwave_total_weight
+        
+        # Minimum 1 lb
+        weight = max(warehouse_weight, 1)
+        
+        # Check for oversized using RTA long pallet flag OR keyword detection
+        oversized = has_long_pallet or any(is_oversized(item.get('name', '')) for item in items)
         
         # Select shipping method based on weight (and future rules)
         shipping_method = select_shipping_method(weight, items)
@@ -360,6 +421,13 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
                         'price': float(product.get('price', 0)),
                     })
                 
+                # Get total_weight from B2BWave (may be string like "8.0")
+                total_weight_raw = raw_order.get('total_weight', 0)
+                try:
+                    total_weight = float(total_weight_raw) if total_weight_raw else 0
+                except (ValueError, TypeError):
+                    total_weight = 0
+                
                 return {
                     'id': raw_order.get('id'),
                     'customer_name': raw_order.get('customer_name'),
@@ -367,6 +435,7 @@ def fetch_b2bwave_order(order_id: str) -> Optional[Dict]:
                     'company_name': raw_order.get('customer_company'),
                     'line_items': line_items,
                     'subtotal': float(raw_order.get('gross_total', 0)),
+                    'total_weight': total_weight,  # B2BWave's actual weight
                     'shipping_address': {
                         'address': raw_order.get('address', ''),
                         'city': raw_order.get('city', ''),
