@@ -149,6 +149,7 @@ SKU_WAREHOUSE_MAP = {
     # Cabinet & Stone (TX default, CA for MSCS)
     'BSN': 'Cabinet & Stone', 'SGCS': 'Cabinet & Stone', 'WOCS': 'Cabinet & Stone',
     'EWSCS': 'Cabinet & Stone', 'CAWN': 'Cabinet & Stone', 'ESCS': 'Cabinet & Stone', 'CS-': 'Cabinet & Stone',
+    'BSW': 'Cabinet & Stone',  # Bright Snow White
     'MSCS': 'Cabinet & Stone CA',  # Ships from California
     # DuraStone
     'NSN': 'DuraStone', 'NBDS': 'DuraStone', 'CMEN': 'DuraStone', 'SIV': 'DuraStone',
