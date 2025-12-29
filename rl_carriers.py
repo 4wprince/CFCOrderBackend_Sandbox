@@ -13,7 +13,11 @@ from datetime import datetime, timedelta
 
 # R+L Carriers API configuration
 RL_API_BASE_URL = "https://api.rlc.com"
-RL_API_KEY = os.environ.get("RL_CARRIERS_API_KEY", "")
+
+
+def _get_api_key() -> str:
+    """Get API key from environment (read at request time)"""
+    return os.environ.get("RL_CARRIERS_API_KEY", "")
 
 
 class RLCarriersError(Exception):
@@ -26,18 +30,19 @@ class RLCarriersError(Exception):
 
 def is_configured() -> bool:
     """Check if R+L Carriers API is configured"""
-    return bool(RL_API_KEY)
+    return bool(_get_api_key())
 
 
 def _make_request(endpoint: str, method: str = "GET", data: dict = None) -> dict:
     """Make authenticated request to R+L Carriers API"""
-    if not RL_API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
         raise RLCarriersError("R+L Carriers API key not configured")
     
     url = f"{RL_API_BASE_URL}/{endpoint}"
     
     req = urllib.request.Request(url, method=method)
-    req.add_header("apiKey", RL_API_KEY)
+    req.add_header("apiKey", api_key)
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
     
@@ -100,9 +105,9 @@ def get_rate_quote(
     Returns:
         Dict with quote details including price and quote number
     """
-    # Default pickup date to tomorrow if not specified
+    # Default pickup date to tomorrow if not specified (R+L wants MM/dd/yyyy format)
     if not pickup_date:
-        pickup_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        pickup_date = (datetime.now() + timedelta(days=1)).strftime("%m/%d/%Y")
     
     # Build request payload
     payload = {
@@ -226,7 +231,7 @@ def get_simple_quote(
                     "Class": freight_class
                 }
             ],
-            "PickupDate": (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            "PickupDate": (datetime.now() + timedelta(days=1)).strftime("%m/%d/%Y")
         }
     }
     
