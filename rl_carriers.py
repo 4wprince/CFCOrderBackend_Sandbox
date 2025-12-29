@@ -521,8 +521,8 @@ def create_pickup_request(
                 }
             ],
             "PickupDate": pickup_date,
-            "ReadyTime": ready_time,
-            "CloseTime": close_time,
+            "ReadyTime": ready_time if "AM" in ready_time or "PM" in ready_time else f"{ready_time} AM" if int(ready_time.split(':')[0]) < 12 else f"{ready_time} PM",
+            "CloseTime": close_time if "AM" in close_time or "PM" in close_time else f"{close_time} PM",
             "AdditionalInstructions": additional_instructions
         },
         "SendEmailConfirmation": send_email_confirmation
