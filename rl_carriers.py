@@ -53,10 +53,12 @@ def _make_request(endpoint: str, method: str = "GET", data: dict = None) -> dict
         with urllib.request.urlopen(req, timeout=30) as response:
             result = json.loads(response.read().decode())
             
-            # Check for API errors
-            if result.get("Code", 0) != 0 or result.get("Errors"):
-                errors = result.get("Errors", [])
-                error_msg = "; ".join([e.get("ErrorMessage", "Unknown error") for e in errors]) if errors else "API error"
+            # Check for API errors (Code 200 = success, 0 also okay)
+            response_code = result.get("Code", 200)
+            errors = result.get("Errors", [])
+            
+            if response_code not in [0, 200] or errors:
+                error_msg = "; ".join([e.get("ErrorMessage", "Unknown error") for e in errors]) if errors else f"API error (code {response_code})"
                 raise RLCarriersError(error_msg, errors)
             
             return result
