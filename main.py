@@ -125,11 +125,25 @@ except ImportError:
     def square_configured():
         return False
 
+# R+L Carriers direct API
+try:
+    from rl_carriers import (
+        get_simple_quote as rl_get_simple_quote,
+        get_rate_quote as rl_get_rate_quote,
+        test_connection as rl_test_connection,
+        is_configured as rl_is_configured,
+        track_shipment as rl_track_shipment
+    )
+    RL_CARRIERS_LOADED = True
+except ImportError:
+    RL_CARRIERS_LOADED = False
+    print("[STARTUP] rl_carriers module not found")
+
 # =============================================================================
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.8")
+app = FastAPI(title="CFC Order Workflow", version="5.9.9")
 
 app.add_middleware(
     CORSMiddleware,
@@ -234,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.8",
+        "version": "5.9.9",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -246,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.8"}
+    return {"status": "ok", "version": "5.9.9"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -519,6 +533,90 @@ def test_shippo_api():
     
     result = test_shippo()
     return result
+
+
+# =============================================================================
+# R+L CARRIERS - LTL Freight Rates (Direct API)
+# =============================================================================
+
+@app.get("/rl/status")
+def rl_status():
+    """Check R+L Carriers API configuration status"""
+    if not RL_CARRIERS_LOADED:
+        return {"configured": False, "message": "rl_carriers module not loaded"}
+    
+    return {
+        "configured": rl_is_configured(),
+        "module_loaded": True,
+        "api_url": "https://api.rlc.com"
+    }
+
+@app.get("/rl/test")
+def rl_test():
+    """Test R+L Carriers API connection"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    return rl_test_connection()
+
+@app.get("/rl/quote")
+def rl_quote(
+    origin_zip: str,
+    dest_zip: str,
+    weight_lbs: int,
+    freight_class: str = "70"
+):
+    """
+    Get LTL freight quote from R+L Carriers.
+    
+    Example: /rl/quote?origin_zip=32256&dest_zip=33101&weight_lbs=500
+    """
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        result = rl_get_simple_quote(
+            origin_zip=origin_zip,
+            dest_zip=dest_zip,
+            weight_lbs=weight_lbs,
+            freight_class=freight_class
+        )
+        return {
+            "status": "ok",
+            "quote": result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+@app.get("/rl/track/{pro_number}")
+def rl_track(pro_number: str):
+    """Track shipment by PRO number"""
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        result = rl_track_shipment(pro_number)
+        return {
+            "status": "ok",
+            "shipment": result
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # =============================================================================
