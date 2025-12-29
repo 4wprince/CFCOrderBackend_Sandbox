@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.14")
+app = FastAPI(title="CFC Order Workflow", version="5.9.15")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.14",
+        "version": "5.9.15",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.14"}
+    return {"status": "ok", "version": "5.9.15"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -874,6 +874,217 @@ def rl_get_notification(pro_number: str):
         from rl_carriers import get_shipment_notification
         result = get_shipment_notification(pro_number)
         return {"status": "ok", "notifications": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# --- R+L Order-Based BOL Creation ---
+
+@app.post("/rl/order/{order_id}/create-bol")
+def rl_create_order_bol(
+    order_id: str,
+    warehouse_code: str,
+    include_pickup: bool = False,
+    pickup_date: Optional[str] = None,
+    special_instructions: Optional[str] = ""
+):
+    """
+    Create BOL for a specific warehouse shipment from an order.
+    Uses warehouse addresses from checkout.py and customer info from B2BWave.
+    
+    Args:
+        order_id: B2BWave order ID
+        warehouse_code: Warehouse code (e.g., 'Cabinet & Stone', 'ROC', 'L&C')
+        include_pickup: Whether to include a pickup request
+        pickup_date: Pickup date in MM/dd/yyyy format (optional)
+        special_instructions: Special handling instructions
+    """
+    if not RL_CARRIERS_LOADED:
+        raise HTTPException(status_code=503, detail="rl_carriers module not loaded")
+    
+    if not rl_is_configured():
+        raise HTTPException(status_code=503, detail="RL_CARRIERS_API_KEY not configured")
+    
+    try:
+        from checkout import WAREHOUSES, fetch_b2bwave_order, calculate_order_shipping
+        from rl_carriers import create_bol
+        
+        # Get warehouse info
+        warehouse = WAREHOUSES.get(warehouse_code)
+        if not warehouse:
+            return {"status": "error", "message": f"Unknown warehouse: {warehouse_code}"}
+        
+        # Fetch order from B2BWave
+        order_data = fetch_b2bwave_order(order_id)
+        if not order_data:
+            return {"status": "error", "message": f"Order {order_id} not found"}
+        
+        # Get shipping address
+        shipping = order_data.get('shipping_address', {})
+        customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip()
+        if not customer_name:
+            customer_name = order_data.get('customer_name', 'Customer')
+        
+        company_name = shipping.get('company', customer_name)
+        
+        # Calculate shipping to get weight for this warehouse
+        dest_address = {
+            'address': shipping.get('address1', ''),
+            'city': shipping.get('city', ''),
+            'state': shipping.get('province_code', ''),
+            'zip': shipping.get('postal_code', ''),
+            'country': shipping.get('country_code', 'US')
+        }
+        
+        shipping_calc = calculate_order_shipping(order_data, dest_address)
+        
+        # Find the shipment for this warehouse
+        warehouse_shipment = None
+        for shipment in shipping_calc.get('shipments', []):
+            if shipment.get('warehouse') == warehouse_code:
+                warehouse_shipment = shipment
+                break
+        
+        if not warehouse_shipment:
+            return {"status": "error", "message": f"No shipment found for warehouse {warehouse_code} in order {order_id}"}
+        
+        weight = warehouse_shipment.get('weight', 100)
+        items = warehouse_shipment.get('items', [])
+        pieces = len(items) if items else 1
+        
+        # Build item description
+        item_descriptions = [f"{item.get('quantity', 1)}x {item.get('name', item.get('sku', 'Cabinet'))}" for item in items[:3]]
+        description = "; ".join(item_descriptions)
+        if len(items) > 3:
+            description += f" +{len(items) - 3} more items"
+        if len(description) > 100:
+            description = f"RTA Cabinets - {len(items)} items"
+        
+        # Get quote number if available
+        quote_number = ""
+        if warehouse_shipment.get('quote', {}).get('quote', {}):
+            quote_number = warehouse_shipment['quote']['quote'].get('quote_number', '')
+        
+        # Create BOL
+        result = create_bol(
+            # Shipper (warehouse)
+            shipper_name=warehouse.get('name'),
+            shipper_address=warehouse.get('address', ''),
+            shipper_city=warehouse.get('city'),
+            shipper_state=warehouse.get('state'),
+            shipper_zip=warehouse.get('zip'),
+            shipper_phone=warehouse.get('phone', ''),
+            # Consignee (customer)
+            consignee_name=company_name,
+            consignee_address=shipping.get('address1', ''),
+            consignee_address2=shipping.get('address2', ''),
+            consignee_city=shipping.get('city', ''),
+            consignee_state=shipping.get('province_code', ''),
+            consignee_zip=shipping.get('postal_code', ''),
+            consignee_phone=shipping.get('phone', ''),
+            consignee_email=order_data.get('customer_email', ''),
+            # Shipment details
+            weight_lbs=int(weight),
+            pieces=pieces,
+            description=description,
+            freight_class="70",
+            po_number=order_id,
+            quote_number=quote_number,
+            special_instructions=special_instructions,
+            # Pickup
+            include_pickup=include_pickup,
+            pickup_date=pickup_date
+        )
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "warehouse": warehouse_code,
+            "bol": result,
+            "shipment_details": {
+                "weight": weight,
+                "pieces": pieces,
+                "description": description
+            }
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/rl/order/{order_id}/shipments")
+def rl_get_order_shipments(order_id: str):
+    """
+    Get R+L-ready shipment info for an order (for BOL creation UI).
+    Shows which warehouses need BOLs and their shipping details.
+    """
+    try:
+        from checkout import WAREHOUSES, fetch_b2bwave_order, calculate_order_shipping
+        
+        # Fetch order
+        order_data = fetch_b2bwave_order(order_id)
+        if not order_data:
+            return {"status": "error", "message": f"Order {order_id} not found"}
+        
+        # Get shipping address
+        shipping = order_data.get('shipping_address', {})
+        dest_address = {
+            'address': shipping.get('address1', ''),
+            'city': shipping.get('city', ''),
+            'state': shipping.get('province_code', ''),
+            'zip': shipping.get('postal_code', ''),
+            'country': shipping.get('country_code', 'US')
+        }
+        
+        # Calculate shipping
+        shipping_calc = calculate_order_shipping(order_data, dest_address)
+        
+        # Build response with warehouse details
+        shipments = []
+        for s in shipping_calc.get('shipments', []):
+            wh_code = s.get('warehouse')
+            wh_info = WAREHOUSES.get(wh_code, {})
+            
+            shipments.append({
+                "warehouse_code": wh_code,
+                "warehouse_name": wh_info.get('name', wh_code),
+                "warehouse_address": {
+                    "address": wh_info.get('address', ''),
+                    "city": wh_info.get('city', ''),
+                    "state": wh_info.get('state', ''),
+                    "zip": wh_info.get('zip', ''),
+                    "phone": wh_info.get('phone', '')
+                },
+                "weight": s.get('weight', 0),
+                "items_count": len(s.get('items', [])),
+                "shipping_method": s.get('shipping_method'),
+                "shipping_cost": s.get('shipping_cost', 0),
+                "quote_number": s.get('quote', {}).get('quote', {}).get('quote_number'),
+                "needs_bol": s.get('shipping_method') == 'ltl'
+            })
+        
+        # Customer info
+        customer_name = f"{shipping.get('first_name', '')} {shipping.get('last_name', '')}".strip()
+        
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "customer": {
+                "name": customer_name or order_data.get('customer_name', ''),
+                "email": order_data.get('customer_email', ''),
+                "company": shipping.get('company', ''),
+                "address": shipping.get('address1', ''),
+                "address2": shipping.get('address2', ''),
+                "city": shipping.get('city', ''),
+                "state": shipping.get('province_code', ''),
+                "zip": shipping.get('postal_code', ''),
+                "phone": shipping.get('phone', '')
+            },
+            "shipments": shipments,
+            "total_shipping": shipping_calc.get('total_shipping', 0),
+            "ltl_shipments_count": sum(1 for s in shipments if s.get('needs_bol'))
+        }
+        
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

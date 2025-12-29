@@ -28,18 +28,104 @@ RL_QUOTE_API_URL = os.environ.get("RL_QUOTE_API_URL", "https://rl-quote-sandbox.
 CHECKOUT_BASE_URL = os.environ.get("CHECKOUT_BASE_URL", "").strip()  # Your checkout page URL
 
 # Warehouse data
+# Warehouse information - full addresses for BOL creation
 WAREHOUSES = {
-    'LI': {'name': 'Liberty Industries', 'city': 'Interlachen', 'state': 'FL', 'zip': '32148'},
-    'DL': {'name': 'DL Cabinetry', 'city': 'Jacksonville', 'state': 'FL', 'zip': '32256'},
-    'ROC': {'name': 'ROC Cabinetry', 'city': 'Norcross', 'state': 'GA', 'zip': '30071'},
-    'GHI': {'name': 'GHI Cabinets', 'city': 'Palmetto', 'state': 'FL', 'zip': '34221'},
-    'Go Bravura': {'name': 'Go Bravura', 'city': 'Houston', 'state': 'TX', 'zip': '77066'},
-    'Love': {'name': 'Love-Milestone', 'city': 'Orlando', 'state': 'FL', 'zip': '32824'},
-    'ARTISAN': {'name': 'Artisan (fallback)', 'city': 'Houston', 'state': 'TX', 'zip': '77066'},
-    'Cabinet & Stone': {'name': 'Cabinet & Stone', 'city': 'Houston', 'state': 'TX', 'zip': '77043'},
-    'Cabinet & Stone CA': {'name': 'Cabinet & Stone CA', 'city': 'Paramount', 'state': 'CA', 'zip': '90723'},
-    'DuraStone': {'name': 'DuraStone', 'city': 'Houston', 'state': 'TX', 'zip': '77037'},
-    'L&C': {'name': 'L&C Cabinetry', 'city': 'Virginia Beach', 'state': 'VA', 'zip': '23454'},
+    'LI': {
+        'name': 'Liberty Industries',
+        'address': '103 Trisket Ln',
+        'city': 'Interlachen',
+        'state': 'FL',
+        'zip': '32148',
+        'phone': '386-325-0825'
+    },
+    'DL': {
+        'name': 'DL Cabinetry',
+        'address': '7825 Parramore Rd',
+        'city': 'Jacksonville',
+        'state': 'FL',
+        'zip': '32256',
+        'phone': '904-886-5000'
+    },
+    'ROC': {
+        'name': 'ROC Cabinetry',
+        'address': '6015 Unity Dr',
+        'city': 'Norcross',
+        'state': 'GA',
+        'zip': '30071',
+        'phone': '770-263-9800'
+    },
+    'GHI': {
+        'name': 'GHI Cabinets',
+        'address': '1402 10th Ave E',
+        'city': 'Palmetto',
+        'state': 'FL',
+        'zip': '34221',
+        'phone': '941-981-9994'
+    },
+    'Go Bravura': {
+        'name': 'Go Bravura',
+        'address': '6910 Fulton St',
+        'city': 'Houston',
+        'state': 'TX',
+        'zip': '77066',
+        'phone': '832-326-7003'
+    },
+    'Love': {
+        'name': 'Love-Milestone',
+        'address': '7130 Overland Rd',
+        'city': 'Orlando',
+        'state': 'FL',
+        'zip': '32824',
+        'phone': '407-857-1985'
+    },
+    'ARTISAN': {
+        'name': 'Artisan (fallback)',
+        'address': '6910 Fulton St',
+        'city': 'Houston',
+        'state': 'TX',
+        'zip': '77066',
+        'phone': '832-326-7003'
+    },
+    'Cabinet & Stone': {
+        'name': 'Cabinet & Stone',
+        'address': '1760 Stebbins Dr',
+        'city': 'Houston',
+        'state': 'TX',
+        'zip': '77043',
+        'phone': '713-468-8062'
+    },
+    'Cabinet & Stone CA': {
+        'name': 'Cabinet & Stone CA',
+        'address': '15500 Vermont Ave',
+        'city': 'Paramount',
+        'state': 'CA',
+        'zip': '90723',
+        'phone': '562-774-8522'
+    },
+    'DuraStone': {
+        'name': 'DuraStone',
+        'address': '4506 Archie St',
+        'city': 'Houston',
+        'state': 'TX',
+        'zip': '77037',
+        'phone': '281-445-4700'
+    },
+    'L&C': {
+        'name': 'L&C Cabinetry',
+        'address': '2157 Vista Circle',
+        'city': 'Virginia Beach',
+        'state': 'VA',
+        'zip': '23454',
+        'phone': '757-425-5544'
+    },
+    'Linda': {
+        'name': 'Dealer Cabinetry',
+        'address': '200 Industrial Blvd',
+        'city': 'Bremen',
+        'state': 'GA',
+        'zip': '30110',
+        'phone': '770-537-4422'
+    },
 }
 
 # SKU prefix to warehouse mapping
