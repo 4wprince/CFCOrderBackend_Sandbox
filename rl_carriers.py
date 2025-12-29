@@ -486,7 +486,7 @@ def create_pickup_for_pro(
     
     payload = {
         "ProNumber": pro_number,
-        "PickupInformation": {
+        "Pickup": {
             "PickupDate": pickup_date,
             "ReadyTime": ready_time,
             "CloseTime": close_time,
