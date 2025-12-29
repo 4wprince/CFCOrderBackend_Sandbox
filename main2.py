@@ -1,6 +1,9 @@
 """
-CFC Order Workflow Backend - v5.9.4
-Refactored with helper modules for better maintainability.
+CFC Order Workflow Backend - v5.9.1
+All parsing/logic server-side. B2BWave API integration for clean order data.
+Auto-sync every 15 minutes. Gmail email scanning for status updates.
+AI Summary with Anthropic Claude API. RL Carriers quote helper.
+Square payment sync for automatic payment matching.
 """
 
 import os
@@ -23,76 +26,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# =============================================================================
-# IMPORT HELPER MODULES
-# =============================================================================
-
-# Config module - all environment variables and constants
-from config import (
-    DATABASE_URL, B2BWAVE_URL, B2BWAVE_USERNAME, B2BWAVE_API_KEY,
-    ANTHROPIC_API_KEY, SHIPPO_API_KEY,
-    AUTO_SYNC_INTERVAL_MINUTES, AUTO_SYNC_DAYS_BACK,
-    SUPPLIER_INFO, WAREHOUSE_ZIPS, OVERSIZED_KEYWORDS
-)
-
-# Database helpers
-from db_helpers import get_db
-
-# Email parsing
-try:
-    from email_parser import parse_b2bwave_email, get_warehouses_for_skus
-    EMAIL_PARSER_LOADED = True
-except ImportError:
-    EMAIL_PARSER_LOADED = False
-    print("[STARTUP] email_parser module not found")
-
-# Detection functions
-try:
-    from detection import (
-        detect_square_payment_link, extract_rl_quote_number, 
-        extract_pro_number, parse_payment_notification,
-        match_payment_to_order, record_payment_received,
-        record_rl_quote, record_pro_number
-    )
-    DETECTION_MODULE_LOADED = True
-except ImportError:
-    DETECTION_MODULE_LOADED = False
-    print("[STARTUP] detection module not found")
-
-# AI Summary (Anthropic)
-try:
-    from ai_summary import call_anthropic_api, generate_order_summary
-    AI_SUMMARY_LOADED = True
-except ImportError:
-    AI_SUMMARY_LOADED = False
-    print("[STARTUP] ai_summary module not found")
-
-# Database migrations
-try:
-    from db_migrations import (
-        create_pending_checkouts_table as _create_pending_checkouts,
-        create_shipments_table as _create_shipments,
-        add_rl_shipping_fields as _add_rl_fields,
-        add_ps_fields as _add_ps_fields,
-        fix_shipment_columns as _fix_shipment_columns,
-        fix_sku_columns as _fix_sku_columns,
-        fix_order_id_length as _fix_order_id_length,
-        recreate_order_status_view as _recreate_order_status_view,
-        add_weight_column as _add_weight_column
-    )
-    DB_MIGRATIONS_LOADED = True
-except ImportError:
-    DB_MIGRATIONS_LOADED = False
-    print("[STARTUP] db_migrations module not found")
-
-# B2BWave API
-try:
-    import b2bwave_api
-    B2BWAVE_MODULE_LOADED = True
-except ImportError:
-    B2BWAVE_MODULE_LOADED = False
-    print("[STARTUP] b2bwave_api module not found")
-
 # Gmail sync module
 try:
     from gmail_sync import run_gmail_sync, gmail_configured
@@ -114,10 +47,112 @@ except ImportError:
         return False
 
 # =============================================================================
-# FASTAPI APP
+# CONFIG
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.4")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if DATABASE_URL and "sslmode" not in DATABASE_URL:
+    DATABASE_URL += ("&" if "?" in DATABASE_URL else "?") + "sslmode=require"
+
+# B2BWave API Config
+B2BWAVE_URL = os.environ.get("B2BWAVE_URL", "").strip().rstrip('/')
+B2BWAVE_USERNAME = os.environ.get("B2BWAVE_USERNAME", "").strip()
+B2BWAVE_API_KEY = os.environ.get("B2BWAVE_API_KEY", "").strip()
+
+# Anthropic API Config
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+# Shippo API Config
+SHIPPO_API_KEY = os.environ.get("SHIPPO_API_KEY", "").strip()
+
+# Auto-sync config
+AUTO_SYNC_INTERVAL_MINUTES = 15
+AUTO_SYNC_DAYS_BACK = 7
+
+# Supplier contact info
+SUPPLIER_INFO = {
+    'LI': {
+        'name': 'Li',
+        'address': '561 Keuka Rd, Interlachen FL 32148',
+        'contact': 'Li Yang (615) 410-6775',
+        'email': 'cabinetrydistribution@gmail.com'
+    },
+    'DL': {
+        'name': 'DL Cabinetry',
+        'address': '8145 Baymeadows Way W, Jacksonville FL 32256',
+        'contact': 'Lily Chen (904) 723-1061',
+        'email': 'ecomm@dlcabinetry.com'
+    },
+    'ROC': {
+        'name': 'ROC Cabinetry',
+        'address': '505 Best Friend Court Suite 580, Norcross GA 30071',
+        'contact': 'Franklin Velasquez (770) 847-8222',
+        'email': 'weborders01@roccabinetry.com'
+    },
+    'Go Bravura': {
+        'name': 'Go Bravura',
+        'address': '14200 Hollister Street Suite 200, Houston TX 77066',
+        'contact': 'Vincent Pan (832) 756-2768',
+        'email': 'vpan@gobravura.com'
+    },
+    'Love-Milestone': {
+        'name': 'Love-Milestone',
+        'address': '10963 Florida Crown Dr STE 100, Orlando FL 32824',
+        'contact': 'Ireen',
+        'email': 'lovetoucheskitchen@gmail.com'
+    },
+    'Cabinet & Stone': {
+        'name': 'Cabinet & Stone',
+        'address': '1760 Stebbins Dr, Houston TX 77043',
+        'contact': 'Amy Cao (281) 833-0980',
+        'email': 'amy@cabinetstonellc.com'
+    },
+    'DuraStone': {
+        'name': 'DuraStone',
+        'address': '9815 North Fwy, Houston TX 77037',
+        'contact': 'Ranjith Venugopalan / Rachel Guo (832) 228-7866',
+        'email': 'ranji@durastoneusa.com'
+    },
+    'L&C Cabinetry': {
+        'name': 'L&C Cabinetry',
+        'address': '2028 Virginia Beach Blvd, Virginia Beach VA 23454',
+        'contact': 'Rey Allison (757) 917-5619',
+        'email': 'lnccabinetryvab@gmail.com'
+    },
+    'GHI': {
+        'name': 'GHI',
+        'address': '1807 48th Ave E Unit 110, Palmetto FL 34221',
+        'contact': 'Kathryn Belfiore (941) 479-8070',
+        'email': 'kbelfiore@ghicabinets.com'
+    },
+    'Linda': {
+        'name': 'Linda / Dealer Cabinetry',
+        'address': '202 West Georgia Ave, Bremen GA 30110',
+        'contact': 'Linda Yang (678) 821-3505',
+        'email': 'linda@dealercabinetry.com'
+    }
+}
+
+# Warehouse ZIP codes for shipping quotes
+WAREHOUSE_ZIPS = {
+    'LI': '32148',
+    'DL': '32256',
+    'ROC': '30071',
+    'Go Bravura': '77066',
+    'Love-Milestone': '32824',
+    'Cabinet & Stone': '77043',
+    'DuraStone': '77037',
+    'L&C Cabinetry': '23454',
+    'GHI': '34221',
+    'Linda': '30110'
+}
+
+# Keywords that indicate oversized shipment (need dimensions on RL quote)
+OVERSIZED_KEYWORDS = ['OVEN', 'PANTRY', '96"', '96*', 'X96', '96X', '96H', '96 H']
+
+app = FastAPI(title="CFC Order Workflow", version="5.9.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,8 +167,20 @@ last_auto_sync = None
 auto_sync_running = False
 
 # =============================================================================
-# DATABASE SCHEMA (kept here for init-db endpoint)
+# DATABASE
 # =============================================================================
+
+@contextmanager
+def get_db():
+    conn = psycopg2.connect(DATABASE_URL)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 SCHEMA_SQL = """
 -- Drop view first (depends on orders)
@@ -1052,7 +1099,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.4",
+        "version": "5.9.1",
         "auto_sync": {
             "enabled": bool(B2BWAVE_URL and B2BWAVE_USERNAME and B2BWAVE_API_KEY),
             "interval_minutes": AUTO_SYNC_INTERVAL_MINUTES,
@@ -1069,7 +1116,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.4"}
+    return {"status": "ok", "version": "5.9.1"}
 
 @app.post("/create-pending-checkouts-table")
 def create_pending_checkouts_table():

@@ -1,5 +1,5 @@
 """
-CFC Order Workflow Backend - v5.9.4
+CFC Order Workflow Backend - v5.9.3
 Refactored with helper modules for better maintainability.
 """
 
@@ -59,32 +59,6 @@ except ImportError:
     DETECTION_MODULE_LOADED = False
     print("[STARTUP] detection module not found")
 
-# AI Summary (Anthropic)
-try:
-    from ai_summary import call_anthropic_api, generate_order_summary
-    AI_SUMMARY_LOADED = True
-except ImportError:
-    AI_SUMMARY_LOADED = False
-    print("[STARTUP] ai_summary module not found")
-
-# Database migrations
-try:
-    from db_migrations import (
-        create_pending_checkouts_table as _create_pending_checkouts,
-        create_shipments_table as _create_shipments,
-        add_rl_shipping_fields as _add_rl_fields,
-        add_ps_fields as _add_ps_fields,
-        fix_shipment_columns as _fix_shipment_columns,
-        fix_sku_columns as _fix_sku_columns,
-        fix_order_id_length as _fix_order_id_length,
-        recreate_order_status_view as _recreate_order_status_view,
-        add_weight_column as _add_weight_column
-    )
-    DB_MIGRATIONS_LOADED = True
-except ImportError:
-    DB_MIGRATIONS_LOADED = False
-    print("[STARTUP] db_migrations module not found")
-
 # B2BWave API
 try:
     import b2bwave_api
@@ -117,7 +91,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.4")
+app = FastAPI(title="CFC Order Workflow", version="5.9.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1052,7 +1026,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.4",
+        "version": "5.9.3",
         "auto_sync": {
             "enabled": bool(B2BWAVE_URL and B2BWAVE_USERNAME and B2BWAVE_API_KEY),
             "interval_minutes": AUTO_SYNC_INTERVAL_MINUTES,
@@ -1069,7 +1043,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.4"}
+    return {"status": "ok", "version": "5.9.3"}
 
 @app.post("/create-pending-checkouts-table")
 def create_pending_checkouts_table():
