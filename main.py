@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.9")
+app = FastAPI(title="CFC Order Workflow", version="5.9.11")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.9",
+        "version": "5.9.11",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.9"}
+    return {"status": "ok", "version": "5.9.11"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -545,10 +545,16 @@ def rl_status():
     if not RL_CARRIERS_LOADED:
         return {"configured": False, "message": "rl_carriers module not loaded"}
     
+    # Check env var directly for debugging
+    import os
+    env_key = os.environ.get("RL_CARRIERS_API_KEY", "")
+    
     return {
         "configured": rl_is_configured(),
         "module_loaded": True,
-        "api_url": "https://api.rlc.com"
+        "api_url": "https://api.rlc.com",
+        "key_length": len(env_key) if env_key else 0,
+        "key_prefix": env_key[:8] + "..." if len(env_key) > 8 else "not set"
     }
 
 @app.get("/rl/test")
