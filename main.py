@@ -1026,7 +1026,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.1",
+        "version": "5.9.3",
         "auto_sync": {
             "enabled": bool(B2BWAVE_URL and B2BWAVE_USERNAME and B2BWAVE_API_KEY),
             "interval_minutes": AUTO_SYNC_INTERVAL_MINUTES,
@@ -1043,7 +1043,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.1"}
+    return {"status": "ok", "version": "5.9.3"}
 
 @app.post("/create-pending-checkouts-table")
 def create_pending_checkouts_table():
