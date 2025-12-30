@@ -191,7 +191,7 @@ def generate_comprehensive_summary(order_id: str) -> str:
             cur.execute("""
                 SELECT warehouse_code, carrier, tracking_number, pro_number, 
                        status, weight_lbs, shipping_cost, created_at
-                FROM shipments
+                FROM order_shipments
                 WHERE order_id = %s
                 ORDER BY created_at ASC
             """, (order_id,))
