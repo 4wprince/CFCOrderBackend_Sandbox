@@ -189,8 +189,8 @@ def generate_comprehensive_summary(order_id: str) -> str:
 
             # Get shipments
             cur.execute("""
-                SELECT warehouse_code, carrier, tracking_number, pro_number, 
-                       status, weight_lbs, shipping_cost, created_at
+                SELECT warehouse, ship_method, tracking, pro_number, 
+                       status, weight, ship_method, created_at
                 FROM order_shipments
                 WHERE order_id = %s
                 ORDER BY created_at ASC
@@ -226,13 +226,13 @@ def generate_comprehensive_summary(order_id: str) -> str:
     if shipments:
         context_parts.append("\n--- SHIPMENTS ---")
         for s in shipments:
-            context_parts.append(f"Warehouse: {s.get('warehouse_code')} | Carrier: {s.get('carrier')} | Status: {s.get('status')}")
-            if s.get('tracking_number'):
-                context_parts.append(f"  Tracking: {s.get('tracking_number')}")
+            context_parts.append(f"Warehouse: {s.get('warehouse')} | Carrier: {s.get('carrier')} | Status: {s.get('status')}")
+            if s.get('tracking'):
+                context_parts.append(f"  Tracking: {s.get('tracking')}")
             if s.get('pro_number'):
                 context_parts.append(f"  PRO: {s.get('pro_number')}")
-            if s.get('weight_lbs'):
-                context_parts.append(f"  Weight: {s.get('weight_lbs')} lbs | Cost: ${s.get('shipping_cost', 0)}")
+            if s.get('weight'):
+                context_parts.append(f"  Weight: {s.get('weight')} lbs | Cost: ${s.get('ship_method', 0)}")
 
     # ALL Email communications (chronological for full history)
     if snippets:
