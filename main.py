@@ -61,7 +61,7 @@ except ImportError:
 
 # AI Summary (Anthropic)
 try:
-    from ai_summary import call_anthropic_api, generate_order_summary
+    from ai_summary import call_anthropic_api, generate_order_summary, generate_comprehensive_summary
     AI_SUMMARY_LOADED = True
 except ImportError:
     AI_SUMMARY_LOADED = False
@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.29")
+app = FastAPI(title="CFC Order Workflow", version="5.9.30")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1706,10 +1706,9 @@ def get_order(order_id: str):
             return {"status": "ok", "order": order}
 
 @app.post("/orders/{order_id}/generate-summary")
-@app.post("/orders/{order_id}/comprehensive-summary")  # Alias for frontend compatibility
 def generate_summary_endpoint(order_id: str, force: bool = False):
     """
-    Generate AI summary for an order.
+    Generate SHORT AI summary for order card display.
     If force=False and summary exists and is less than 1 hour old, returns cached.
     """
     with get_db() as conn:
@@ -1736,7 +1735,7 @@ def generate_summary_endpoint(order_id: str, force: bool = False):
                         "updated_at": order['ai_summary_updated_at'].isoformat()
                     }
     
-    # Generate new summary
+    # Generate new SHORT summary
     summary = generate_order_summary(order_id)
     
     # Save to database
@@ -1747,6 +1746,32 @@ def generate_summary_endpoint(order_id: str, force: bool = False):
                 SET ai_summary = %s, ai_summary_updated_at = NOW(), updated_at = NOW()
                 WHERE order_id = %s
             """, (summary, order_id))
+    
+    return {
+        "status": "ok",
+        "summary": summary,
+        "cached": False,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@app.post("/orders/{order_id}/comprehensive-summary")
+def generate_comprehensive_summary_endpoint(order_id: str, force: bool = False):
+    """
+    Generate COMPREHENSIVE AI summary for order popup - full history analysis.
+    This provides detailed timeline, communications, shipping status, and issues.
+    """
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Check if order exists
+            cur.execute("SELECT order_id FROM orders WHERE order_id = %s", (order_id,))
+            order = cur.fetchone()
+            
+            if not order:
+                raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Generate COMPREHENSIVE summary (always fresh for now)
+    summary = generate_comprehensive_summary(order_id)
     
     return {
         "status": "ok",
