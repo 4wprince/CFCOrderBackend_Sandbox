@@ -143,7 +143,7 @@ except ImportError:
 # FASTAPI APP
 # =============================================================================
 
-app = FastAPI(title="CFC Order Workflow", version="5.9.28")
+app = FastAPI(title="CFC Order Workflow", version="5.9.29")
 
 app.add_middleware(
     CORSMiddleware,
@@ -248,7 +248,7 @@ def root():
     return {
         "status": "ok", 
         "service": "CFC Order Workflow", 
-        "version": "5.9.28",
+        "version": "5.9.29",
         "auto_sync": sync_status,
         "gmail_sync": {
             "enabled": gmail_configured()
@@ -260,7 +260,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "5.9.28"}
+    return {"status": "ok", "version": "5.9.29"}
 
 # =============================================================================
 # DATABASE MIGRATION ENDPOINTS (logic in db_migrations.py)
@@ -1706,6 +1706,7 @@ def get_order(order_id: str):
             return {"status": "ok", "order": order}
 
 @app.post("/orders/{order_id}/generate-summary")
+@app.post("/orders/{order_id}/comprehensive-summary")  # Alias for frontend compatibility
 def generate_summary_endpoint(order_id: str, force: bool = False):
     """
     Generate AI summary for an order.
